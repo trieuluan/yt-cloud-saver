@@ -6,14 +6,15 @@
 <h1 align="center">YT Cloud Saver</h1>
 
 <p align="center">
-  Save YouTube videos straight to <b>Google Drive</b> (or any <code>rclone</code> cloud) in 1 click — auto-organized by channel, with automatic fallback playback if a video gets removed from YouTube.
+  Save YouTube videos straight to <b>Google Drive</b> (or any <code>rclone</code> cloud) in 1 click, with <b>AI Bilingual Subtitles</b>, <b>Edge Neural TTS Dubbing</b>, <b>Whisper.cpp</b> offline transcription, and instant inline Cloud playback.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Chrome%20Extension-MV3-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Extension MV3">
   <img src="https://img.shields.io/badge/Desktop%20App-Tauri%20v2-24C8DB?logo=tauri&logoColor=white" alt="Tauri v2">
+  <img src="https://img.shields.io/badge/AI%20Subtitles-Gemini%20%7C%20OpenAI%20%7C%20Whisper-8B5CF6" alt="AI Subtitles">
+  <img src="https://img.shields.io/badge/TTS%20Dubbing-Edge%20Neural%20TTS-10B981" alt="Edge Neural TTS">
   <img src="https://img.shields.io/badge/Cloud-Google%20Drive%20%7C%20rclone-34A853?logo=googledrive&logoColor=white" alt="Google Drive">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-111827" alt="Cross Platform">
 </p>
 
 ---
@@ -36,13 +37,22 @@ https://github.com/user-attachments/assets/fd3dc00d-2bef-45b1-a8cb-98be6c803195
 
 | Feature | Description |
 | :--- | :--- |
-| **1-Click Save on YouTube** | Adds a **Save to Cloud** button right next to Like & Share on YouTube Watch and Shorts pages. |
-| **Best MP4 + Audio** | Uses `yt-dlp` + `ffmpeg` to fetch and merge the highest quality video & audio, then deletes local temp files after upload. |
-| **Auto-Organize by Channel** | Optionally creates `<Destination>/<Channel Name>/` folders automatically on Google Drive without duplicates. |
-| **Browse & Create Drive Folders** | Visual folder picker and folder creator inside both the Desktop App and Extension Popup. |
-| **Cloud Library Sync** | `↻ Sync Drive` scans your Google Drive folder by `[videoId]` so `Saved ✓` persists across devices and stays accurate if you delete files on Drive. |
-| **Fallback Cloud Player** | If a saved video is later removed or copyright-struck on YouTube, opening its URL automatically streams your saved copy from Google Drive right inside the YouTube player frame (no local download needed). |
-| **Lightweight Menu Bar App** | Built with **Tauri v2** (~10 MB). Closing the window minimizes to the Menu Bar / System Tray while keeping the background service active. |
+| **1-Click Save & Cloud Menu** | Adds a single **`Save to Cloud`** / **`Saved ✓ ▾`** pill next to Like & Share with **Play from Cloud** (inline), **Re-save / Update**, and **Remove from Cloud** (2-step confirm). |
+| **Native Player Bar (`AI CC` + `Dub`)** | Integrates **`AI CC`** (cycles `OFF → Bilingual → Translated`) and **`Dub`** directly into YouTube's bottom-right control bar (`.ytp-right-controls`), auto-hiding with the player controls. |
+| **AI Subtitles + Whisper.cpp** | Translates YouTube transcripts via **Gemini** or **OpenAI** with chunked `whisper.cpp` fallback for videos without captions, progressive loading, and `Export .srt ▾` (**Translated / Original / Bilingual**). |
+| **Edge Neural TTS Dubbing** | Built-in Rust WebSocket Edge TTS (`Hoài Mỹ`, `Nam Minh`, `Aria`, `Guy`) with batch pre-buffering, adaptive speech speed synced to video `playbackRate`, and automatic disk cache cleanup (100 MB / 3 days). |
+| **Subtitle Customizer (Popup)** | Two-tab Extension Popup (`Subtitles & Dub` + `Cloud & Jobs`) with live preview, 2-way **Display Mode** sync, size (`12–32px`), text/background colors, opacity (`0–100%`), voice, speed, and dub volume. |
+| **Fast Inline Cloud Player** | Streams saved MP4s from Google Drive right inside the YouTube player frame via `rclone serve http` range proxy (zero disk cache, 15-min idle auto-stop) with a YouTube-style control bar and `✕ YouTube` switch-back. |
+| **Subtitle Backup & Restore** | Automatically backs up cached subtitles to `<Remote>/_ytcs_subtitles/` after translation, with **`↑ Backup Subs`** and **`↓ Restore Subs`** buttons when Drive is connected. |
+| **Auto-Organize & Sync** | Organizes downloads into `<Destination>/<Channel Name>/`, supports browser cookies for restricted videos, and syncs `Saved ✓` status across devices via `↻ Sync Drive`. |
+
+### Keyboard Shortcuts (YouTube & Cloud Player)
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Option / Alt + C` | Toggle & cycle **`AI CC`** (`OFF → Bilingual → Translated`) |
+| `Option / Alt + D` | Toggle **`Dub`** (`ON / OFF`) |
+| `Space / K`, `← / →`, `J / L`, `M`, `F` | Full YouTube-style playback shortcuts inside Cloud Player |
 
 ---
 
