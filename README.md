@@ -1,3 +1,4 @@
+
 <p align="center">
   <img src="docs/banner.png" alt="YT Cloud Saver Banner" width="100%">
 </p>
@@ -19,7 +20,7 @@
 
 ## Demo
 
-> **Tip for GitHub Release:** Drag and drop [`docs/demo.mp4`](docs/demo.mp4) directly into this section when editing on GitHub.com to render an inline video player with sound!
+https://github.com/user-attachments/assets/fd3dc00d-2bef-45b1-a8cb-98be6c803195
 
 <p align="center">
   <img src="docs/preview-youtube.png" alt="YT Cloud Saver on YouTube" width="90%">
