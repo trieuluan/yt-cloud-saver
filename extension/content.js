@@ -1063,6 +1063,8 @@
     return subBundle;
   }
 
+  let subCycleStartMode = null;
+
   function syncSubModeToStorage(mode) {
     if (mode !== 'bilingual' && mode !== 'translated') return;
     if (subStyle.defaultMode === mode) return;
@@ -1071,11 +1073,11 @@
   }
 
   async function onSubClick() {
-    const startMode = subStyle.defaultMode || 'bilingual';
     if (subMode === 'off') {
       try {
         await ensureTranslatedBundle();
-        subMode = startMode;
+        subCycleStartMode = subStyle.defaultMode || 'bilingual';
+        subMode = subCycleStartMode;
         updateSubButtons();
         if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       } catch (err) {
@@ -1086,13 +1088,14 @@
       }
       return;
     }
-    if (subMode === startMode) {
-      subMode = startMode === 'bilingual' ? 'translated' : 'bilingual';
+    if (subCycleStartMode && subMode === subCycleStartMode) {
+      subMode = subCycleStartMode === 'bilingual' ? 'translated' : 'bilingual';
       syncSubModeToStorage(subMode);
       updateSubButtons();
       return;
     }
     subMode = 'off';
+    subCycleStartMode = null;
     const overlay = document.getElementById(SUB_OVERLAY_ID);
     if (overlay) overlay.innerHTML = '';
     updateSubButtons();

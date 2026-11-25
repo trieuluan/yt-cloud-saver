@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.6] - 2026-11-26
+
+### Fixed
+- **Restore `AI CC: OFF` State in Cycle:** Fixed `AI CC` button getting stuck cycling between `Translated` and `Bilingual` without returning to `OFF` when 2-way Popup sync updated `defaultMode`.
+
 ## [1.2.5] - 2026-11-26
 
 ### Improved

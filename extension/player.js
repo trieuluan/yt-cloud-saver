@@ -455,12 +455,13 @@
     throw new Error('No subtitles available');
   }
 
+  let subCycleStartMode = null;
   subBtn.addEventListener('click', async () => {
-    const startMode = subStyle.defaultMode || 'bilingual';
     if (subMode === 'off') {
       try {
         await ensureSubtitlesLoaded();
-        subMode = startMode;
+        subCycleStartMode = subStyle.defaultMode || 'bilingual';
+        subMode = subCycleStartMode;
         updateButtons();
         if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       } catch (err) {
@@ -470,14 +471,15 @@
       }
       return;
     }
-    if (subMode === startMode) {
-      subMode = startMode === 'bilingual' ? 'translated' : 'bilingual';
+    if (subCycleStartMode && subMode === subCycleStartMode) {
+      subMode = subCycleStartMode === 'bilingual' ? 'translated' : 'bilingual';
       if (subStyle.defaultMode !== subMode) {
         subStyle = { ...subStyle, defaultMode: subMode };
         chrome.storage.local.set({ subStyle });
       }
     } else {
       subMode = 'off';
+      subCycleStartMode = null;
       subOverlay.innerHTML = '';
     }
     updateButtons();
