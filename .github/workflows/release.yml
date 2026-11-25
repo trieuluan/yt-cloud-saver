@@ -15,13 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package Chrome Extension & Upload to Release
+      - name: Package Chrome Extension & Update Release Notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p dist
           (cd extension && zip -r ../dist/yt-cloud-saver-extension.zip .)
           gh release upload "${{ github.ref_name }}" dist/yt-cloud-saver-extension.zip --clobber
+          VER="${GITHUB_REF_NAME#v}"
+          NOTES=$(awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -n "$NOTES" ]; then
+            printf "%s\n\n---\nDownload the Desktop installer for your OS and \`yt-cloud-saver-extension.zip\`.\n" "$NOTES" > dist/notes.md
+            gh release edit "${{ github.ref_name }}" --notes-file dist/notes.md
+          fi
 
   build-desktop:
     permissions:
