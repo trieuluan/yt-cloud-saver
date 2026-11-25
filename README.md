@@ -48,18 +48,22 @@ https://github.com/user-attachments/assets/fd3dc00d-2bef-45b1-a8cb-98be6c803195
 
 ## Installation (For Everyone)
 
-### Step 1: Install Prerequisites & Desktop App
+### Step 1: Install Desktop App & Connect Google Drive
 1. Download the installer for your OS from the [**Latest Release**](../../releases/latest):
-   - **macOS:** `.dmg`
+   - **macOS:** `.dmg` (drag `YT Cloud Saver.app` into **Applications**)
+     > **macOS Note:** Because the app is not notarized with an Apple Developer ID, macOS may show *"YT Cloud Saver is damaged and can't be opened"*. Run this once in Terminal to clear the quarantine flag:
+     > ```bash
+     > xattr -cr "/Applications/YT Cloud Saver.app"
+     > ```
    - **Windows:** `.exe` / `.msi`
    - **Linux:** `.AppImage` / `.deb`
-2. Ensure `yt-dlp`, `ffmpeg`, and `rclone` are installed (on macOS: `brew install yt-dlp ffmpeg rclone`).
-3. Open **YT Cloud Saver**, go to **Cloud & Settings**, and click **Connect** to sign in to Google Drive in your browser.
+2. Open **YT Cloud Saver** — if `yt-dlp`, `ffmpeg`, or `rclone` are missing, click **Download Missing Tools** right inside the app (no terminal needed).
+3. Go to **Cloud & Settings** and click **Connect** to sign in to Google Drive in your browser.
 
 ### Step 2: Install the Chrome Extension
-1. Download and unzip `yt-cloud-saver-extension.zip` from the [**Latest Release**](../../releases/latest).
-2. Open `chrome://extensions` in Chrome and enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the unzipped `extension` folder.
+1. Click **Extension Guide** at the bottom-right of the Desktop App, then click **1. Open Extension Folder** and **2. Open `chrome://extensions`** *(or download `yt-cloud-saver-extension.zip` from the [**Latest Release**](../../releases/latest))*.
+2. Enable **Developer mode** (top right) in Chrome.
+3. Drag & drop the highlighted `extension` folder onto the Chrome Extensions page (or click **Load unpacked**).
 
 ### Step 3: Save & Watch
 - Open any YouTube video and click **Save to Cloud**.
