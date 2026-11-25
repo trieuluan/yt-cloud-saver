@@ -8,17 +8,20 @@ on:
 
 jobs:
   package-extension:
+    needs: build-desktop
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package Chrome Extension
+      - name: Package Chrome Extension & Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p dist
           (cd extension && zip -r ../dist/yt-cloud-saver-extension.zip .)
-      - uses: actions/upload-artifact@v4
-        with:
-          name: extension-zip
-          path: dist/yt-cloud-saver-extension.zip
+          gh release upload "${{ github.ref_name }}" dist/yt-cloud-saver-extension.zip --clobber
 
   build-desktop:
     permissions:
