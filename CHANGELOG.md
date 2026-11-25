@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.5] - 2026-11-26
+
+### Improved
+- **Seamless Dubbing Pause & Resume:** Pausing a video now pauses the dubbed audio in place and resumes from the exact position when playback continues, instead of restarting the current line from the beginning.
+
 ## [1.2.4] - 2026-11-26
 
 ### Improved & Fixed

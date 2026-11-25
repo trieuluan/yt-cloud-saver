@@ -660,6 +660,41 @@
     }
   }
 
+  function pauseDubbingSpeech(video) {
+    if (speakTimer) {
+      clearTimeout(speakTimer);
+      speakTimer = null;
+    }
+    if (dubAudioEl && !dubAudioEl.paused) {
+      try {
+        dubAudioEl.pause();
+      } catch {}
+    }
+    if (window.speechSynthesis?.speaking) {
+      try {
+        window.speechSynthesis.pause();
+      } catch {}
+    }
+    restoreVideoVolume(video);
+  }
+
+  function resumeDubbingIfSameCue(video, curIdx) {
+    if (!dubEnabled || !video || video.paused) return false;
+    if (curIdx >= 0 && curIdx === lastSpokenCueIdx) {
+      if (dubAudioEl && dubAudioEl.src && dubAudioEl.paused && !dubAudioEl.ended && dubAudioEl.currentTime > 0) {
+        duckVideoVolume(video);
+        dubAudioEl.play().catch(() => {});
+        return true;
+      }
+      if (window.speechSynthesis?.paused) {
+        duckVideoVolume(video);
+        window.speechSynthesis.resume();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function stopDubbingSpeech(video, resetCue = false) {
     speakSeq += 1;
     if (resetCue) lastSpokenCueIdx = -1;
@@ -689,7 +724,13 @@
     if (!video || video._ytcsDubBound) return;
     video._ytcsDubBound = true;
     video.addEventListener('pause', () => {
-      if (dubEnabled) stopDubbingSpeech(video, true);
+      if (dubEnabled) pauseDubbingSpeech(video);
+    });
+    video.addEventListener('play', () => {
+      if (!dubEnabled || !subBundle?.cues?.length) return;
+      const nowMs = video.currentTime * 1000;
+      const curIdx = subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs);
+      resumeDubbingIfSameCue(video, curIdx);
     });
     video.addEventListener('seeking', () => {
       if (dubEnabled) stopDubbingSpeech(video, true);
@@ -946,12 +987,8 @@
       if (dubEnabled) {
         bindVideoDubEvents(video);
         if (video.paused) {
-          if (
-            (dubAudioEl && !dubAudioEl.paused) ||
-            window.speechSynthesis?.speaking ||
-            window.speechSynthesis?.pending
-          ) {
-            stopDubbingSpeech(video, true);
+          if (dubAudioEl && !dubAudioEl.paused) {
+            pauseDubbingSpeech(video);
           }
         } else if (idx >= 0 && idx !== lastSpokenCueIdx) {
           lastSpokenCueIdx = idx;

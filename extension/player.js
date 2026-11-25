@@ -103,6 +103,41 @@
     }
   }
 
+  function pauseDubbingSpeech() {
+    if (speakTimer) {
+      clearTimeout(speakTimer);
+      speakTimer = null;
+    }
+    if (dubAudioEl && !dubAudioEl.paused) {
+      try {
+        dubAudioEl.pause();
+      } catch {}
+    }
+    if (window.speechSynthesis?.speaking) {
+      try {
+        window.speechSynthesis.pause();
+      } catch {}
+    }
+    restoreVideoVolume();
+  }
+
+  function resumeDubbingIfSameCue(curIdx) {
+    if (!dubEnabled || videoEl.paused) return false;
+    if (curIdx >= 0 && curIdx === lastSpokenCueIdx) {
+      if (dubAudioEl && dubAudioEl.src && dubAudioEl.paused && !dubAudioEl.ended && dubAudioEl.currentTime > 0) {
+        duckVideoVolume();
+        dubAudioEl.play().catch(() => {});
+        return true;
+      }
+      if (window.speechSynthesis?.paused) {
+        duckVideoVolume();
+        window.speechSynthesis.resume();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function stopDubbingSpeech(resetCue = false) {
     speakSeq += 1;
     if (resetCue) lastSpokenCueIdx = -1;
@@ -129,7 +164,13 @@
   }
 
   videoEl.addEventListener('pause', () => {
-    if (dubEnabled) stopDubbingSpeech(true);
+    if (dubEnabled) pauseDubbingSpeech();
+  });
+  videoEl.addEventListener('play', () => {
+    if (!dubEnabled || !subBundle?.cues?.length) return;
+    const nowMs = videoEl.currentTime * 1000;
+    const curIdx = subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs);
+    resumeDubbingIfSameCue(curIdx);
   });
   videoEl.addEventListener('seeking', () => {
     if (dubEnabled) stopDubbingSpeech(true);
@@ -358,12 +399,8 @@
 
       if (dubEnabled) {
         if (videoEl.paused) {
-          if (
-            (dubAudioEl && !dubAudioEl.paused) ||
-            window.speechSynthesis?.speaking ||
-            window.speechSynthesis?.pending
-          ) {
-            stopDubbingSpeech(true);
+          if (dubAudioEl && !dubAudioEl.paused) {
+            pauseDubbingSpeech();
           }
         } else if (idx >= 0 && idx !== lastSpokenCueIdx) {
           lastSpokenCueIdx = idx;
