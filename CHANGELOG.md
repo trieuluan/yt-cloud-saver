@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.3] - 2026-11-26
+
+### Fixed
+- **Prevent 99% → 50% Upload Retry Loop on Large Files:** Configured `rclone copy` with `--drive-chunk-size=64M`, `--low-level-retries=10`, `--retries=1`, and `--timeout=5m` so large MP4 uploads commit reliably without restarting from scratch and doubling reported transfer size.
+
 ## [1.2.2] - 2026-11-26
 
 ### Fixed & Improved
