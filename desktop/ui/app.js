@@ -294,9 +294,11 @@ function renderJobs(jobs = [], translations = []) {
         const isOpen = openExportFile === sub.fileName ? ' open' : '';
         return `
       <div class="job-item">
-        <div class="job-top">
-          <div class="job-title"><span class="kind-pill kind-sub">Sub ✓</span>${escapeHtml(sub.title)}</div>
+        <div class="job-title"><span class="kind-pill kind-sub">Sub ✓</span>${escapeHtml(sub.title)}</div>
+        <div class="sub-footer">
+          <div class="job-meta">${escapeHtml(sub.targetLang)} · ${escapeHtml(sub.source)} · ${sub.lineCount} lines</div>
           <div class="btn-group">
+            <button type="button" class="btn-accent-ghost btn-xs" data-retranslate-sub="${escapeHtml(sub.fileName)}">↻ Re-translate</button>
             <div class="export-dropdown${isOpen}" data-file="${escapeHtml(sub.fileName)}">
               <button type="button" class="btn-ghost btn-xs" data-export-toggle="${escapeHtml(sub.fileName)}">Export .srt ▾</button>
               <div class="export-menu">
@@ -308,7 +310,6 @@ function renderJobs(jobs = [], translations = []) {
             <button class="btn-danger-ghost btn-xs" data-delete-sub="${escapeHtml(sub.fileName)}">Delete</button>
           </div>
         </div>
-        <div class="job-meta">${escapeHtml(sub.targetLang)} · ${escapeHtml(sub.source)} · ${sub.lineCount} lines</div>
       </div>
     `;
       },
@@ -737,6 +738,7 @@ jobsList.addEventListener('click', async (e) => {
   const deleteId = target.getAttribute('data-delete');
   const exportSub = target.getAttribute('data-export-sub');
   const exportMode = target.getAttribute('data-export-mode') || 'translated';
+  const retranslateSub = target.getAttribute('data-retranslate-sub');
   const deleteSub = target.getAttribute('data-delete-sub');
   if (cancelId) {
     await invoke('cancel_job', { id: cancelId });
@@ -756,6 +758,14 @@ jobsList.addEventListener('click', async (e) => {
     } catch (err) {
       activityHint.classList.remove('hidden');
       activityHint.textContent = `Export failed: ${err}`;
+    }
+  } else if (retranslateSub) {
+    try {
+      await invoke('retranslate_subtitle_cache', { fileName: retranslateSub });
+      await loadState();
+    } catch (err) {
+      activityHint.classList.remove('hidden');
+      activityHint.textContent = `Re-translate failed: ${err}`;
     }
   } else if (deleteSub) {
     await invoke('delete_subtitle_cache', { fileName: deleteSub });

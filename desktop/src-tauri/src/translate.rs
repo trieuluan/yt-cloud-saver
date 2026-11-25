@@ -852,6 +852,33 @@ pub fn delete_cached_subtitle(data_dir: &Path, file_name: &str) -> Result<(), St
     Ok(())
 }
 
+pub fn prepare_retranslate_from_cache(
+    data_dir: &Path,
+    file_name: &str,
+) -> Result<(String, String), String> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid file name".to_string());
+    }
+    let path = data_dir.join("subtitles").join(file_name);
+    let raw = fs::read_to_string(&path).map_err(|e| format!("Subtitle cache not found: {e}"))?;
+    let bundle: SubtitleBundle = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let raw_cues: Vec<SubtitleCue> = bundle
+        .cues
+        .iter()
+        .map(|c| SubtitleCue {
+            start_ms: c.start_ms,
+            end_ms: c.end_ms,
+            original: c.original.clone(),
+            translated: String::new(),
+        })
+        .collect();
+    if !raw_cues.is_empty() {
+        save_raw_cache(data_dir, &bundle.video_id, &bundle.source, &raw_cues);
+    }
+    let _ = fs::remove_file(&path);
+    Ok((bundle.video_id, bundle.title))
+}
+
 pub fn export_cached_srt(
     data_dir: &Path,
     file_name: &str,

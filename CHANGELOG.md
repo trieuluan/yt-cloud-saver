@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.8] - 2026-11-26
+
+### Added & Improved
+- **1-Click `↻ Re-translate` on Cached Subtitles:** Added a `↻ Re-translate` button on each `Sub ✓` card in the Desktop App (with full-width title layout and clean bottom action row). Reuses existing `original` cues & timestamps without re-downloading audio or re-running Whisper.
+
 ## [1.2.7] - 2026-11-26
 
 ### Added
