@@ -68,6 +68,7 @@ https://github.com/user-attachments/assets/03aaa79a-9368-4505-a0cc-7292cde233a3
      > xattr -cr "/Applications/YT Cloud Saver.app"
      > ```
    - **Windows:** `.exe` / `.msi`
+     > **Windows Note:** Because the app is not signed with a paid EV certificate, Windows SmartScreen may show *"Windows protected your PC"*. Click **More info → Run anyway** to install.
    - **Linux:** `.AppImage` / `.deb`
 2. Open **YT Cloud Saver** — if `yt-dlp`, `ffmpeg`, or `rclone` are missing, click **Download Missing Tools** right inside the app (no terminal needed).
 3. Go to **Cloud & Settings** and click **Connect** to sign in to Google Drive in your browser.
@@ -101,6 +102,18 @@ If you prefer running the companion server without the Tauri UI:
 ```bash
 node server/index.js
 ```
+
+---
+
+## Support
+
+YT Cloud Saver is free and open source. If it saves you time or makes watching videos more enjoyable, you can buy me a coffee:
+
+<a href="https://ko-fi.com/luantruong19136"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi" height="36"></a>
+
+**From Vietnam:** scan with MoMo or any banking app (VietQR / Napas 247).
+
+<img src="docs/momo-qr.png" width="180" alt="MoMo / VietQR donation code">
 
 ---
 
