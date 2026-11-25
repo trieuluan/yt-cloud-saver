@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+*.log
+.env
+tmp/
+downloads/
+__pycache__/
+*.pyc
+.venv/
+server/jobs.json
+server/config.json
+server/tmp/
+desktop/src-tauri/target/
+dist/
+video/node_modules/

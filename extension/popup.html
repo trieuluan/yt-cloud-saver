@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>YT Cloud Saver</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="title-row">
+        <h1>YT Cloud Saver</h1>
+        <div class="header-actions">
+          <button id="openAppBtn" type="button" class="btn-ghost" title="Bring Desktop App to front">Open App</button>
+          <span id="statusBadge" class="badge badge-offline">Checking...</span>
+        </div>
+      </div>
+      <div id="toolsRow" class="tools-row"></div>
+    </header>
+
+    <section class="card">
+      <h2>Cloud Destination &amp; Options</h2>
+      <div class="field">
+        <span>Cloud Folder (rclone)</span>
+        <div class="input-with-btn">
+          <input id="remoteInput" type="text" placeholder="gdrive:YouTube Saved" list="remoteSuggestions" />
+          <button id="browseBtn" type="button" class="btn-secondary">Browse</button>
+        </div>
+        <datalist id="remoteSuggestions"></datalist>
+      </div>
+
+      <div id="browserBox" class="browser-box hidden">
+        <div class="browser-header">
+          <span id="browserPath" class="browser-path">gdrive:</span>
+          <div class="browser-actions">
+            <button id="upDirBtn" type="button" class="btn-ghost">.. Up</button>
+            <button id="useDirBtn" type="button" class="btn-primary btn-xs">Use Folder</button>
+          </div>
+        </div>
+        <div id="dirList" class="dir-list"></div>
+        <div class="mkdir-row">
+          <input id="newDirInput" type="text" placeholder="New folder name..." />
+          <button id="createDirBtn" type="button" class="btn-secondary btn-xs">+ Create</button>
+        </div>
+      </div>
+
+      <label class="checkbox-row">
+        <input id="groupByChannelInput" type="checkbox" checked />
+        <span>Auto-create subfolder by channel name</span>
+      </label>
+      <div id="pathPreview" class="preview-text"></div>
+
+      <div class="row">
+        <label class="field grow">
+          <span>Quality</span>
+          <select id="qualitySelect">
+            <option value="best">Best MP4</option>
+            <option value="1080">Up to 1080p</option>
+            <option value="720">Up to 720p</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>Local Server</span>
+          <input id="serverUrlInput" type="text" placeholder="http://127.0.0.1:4873" />
+        </label>
+      </div>
+      <div class="actions-row">
+        <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
+        <span id="settingsMsg" class="hint"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Jobs</h2>
+        <button id="refreshBtn" class="btn-ghost" title="Refresh">Refresh</button>
+      </div>
+      <div id="jobsList" class="jobs-list">
+        <p class="empty">No jobs yet.</p>
+      </div>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

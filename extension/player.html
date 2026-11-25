@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>YT Cloud Saver Player</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+      }
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #000;
+      }
+      .badge {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 10;
+        background: rgba(15, 17, 21, 0.82);
+        border: 1px solid rgba(74, 222, 128, 0.45);
+        color: #4ade80;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 5px 10px;
+        border-radius: 999px;
+        pointer-events: none;
+        transition: opacity 0.4s ease;
+      }
+      .error-box {
+        position: fixed;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 24px;
+        text-align: center;
+        background: #0f1115;
+      }
+      .error-box.visible {
+        display: flex;
+      }
+      .error-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .error-sub {
+        font-size: 13px;
+        color: #9aa3b2;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="badge" class="badge">Playing saved copy from Google Drive</div>
+    <video id="video" controls autoplay playsinline></video>
+    <div id="errorBox" class="error-box">
+      <div class="error-title">Could not stream saved copy</div>
+      <div id="errorSub" class="error-sub">Make sure YT Cloud Saver Desktop App is running.</div>
+    </div>
+    <script src="player.js"></script>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YT Cloud Saver</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-icon">YT</div>
+          <div>
+            <h1>YT Cloud Saver</h1>
+            <div class="status-line">
+              <span class="dot"></span>
+              <span>Ready · Background service active</span>
+            </div>
+          </div>
+        </div>
+        <button id="sysBtn" class="pill-btn" type="button">Engine: Checking... ▾</button>
+      </header>
+
+      <div id="sysDrawer" class="sys-drawer hidden">
+        <div id="toolsRow" class="tools-row"></div>
+        <span class="muted">127.0.0.1:4873</span>
+      </div>
+
+      <nav class="tabs">
+        <button id="tabActivity" class="tab active" type="button">Activity</button>
+        <button id="tabSettings" class="tab" type="button">Cloud &amp; Settings</button>
+      </nav>
+
+      <!-- ACTIVITY VIEW -->
+      <section id="viewActivity" class="view">
+        <div id="setupBanner" class="setup-banner hidden">
+          <div>
+            <div class="banner-title">Connect Google Drive to start</div>
+            <div class="banner-sub">1-click sign in, no terminal needed.</div>
+          </div>
+          <button id="bannerConnectBtn" class="btn-primary" type="button">Connect Drive</button>
+        </div>
+
+        <form id="quickSaveForm" class="quick-save">
+          <input
+            id="quickUrlInput"
+            type="url"
+            placeholder="Paste a YouTube link to save..."
+            autocomplete="off"
+          />
+          <button id="quickSaveBtn" class="btn-primary" type="submit">Save</button>
+        </form>
+        <p id="quickSaveError" class="error-text hidden"></p>
+
+        <div class="sync-bar">
+          <span id="syncStatusText" class="muted">Cloud library: 0 videos</span>
+          <button id="syncDriveBtn" class="btn-ghost" type="button">↻ Sync Drive</button>
+        </div>
+
+        <div id="jobsList" class="jobs-list">
+          <p class="empty">No jobs yet. Click "Save to Cloud" on YouTube or paste a link above.</p>
+        </div>
+      </section>
+
+      <!-- SETTINGS VIEW -->
+      <section id="viewSettings" class="view hidden">
+        <div class="card">
+          <div class="account-row">
+            <div class="account-info">
+              <div id="accountAvatar" class="avatar">G</div>
+              <div>
+                <div class="account-title">Google Drive</div>
+                <div id="remotesText" class="muted">Checking account...</div>
+              </div>
+            </div>
+            <button id="connectDriveBtn" class="btn-secondary" type="button">Connect</button>
+          </div>
+          <p id="connectHint" class="hint-text hidden"></p>
+        </div>
+
+        <div class="field">
+          <span>Destination Folder</span>
+          <div class="input-with-btn">
+            <input id="remoteInput" type="text" placeholder="gdrive:YouTube Saved" />
+            <button id="browseBtn" class="btn-secondary" type="button">Change...</button>
+          </div>
+        </div>
+
+        <div id="browserBox" class="browser-box hidden">
+          <div class="browser-header">
+            <span id="browserPath" class="browser-path">gdrive:</span>
+            <div class="browser-actions">
+              <button id="upDirBtn" class="btn-ghost" type="button">.. Up</button>
+              <button id="useDirBtn" class="btn-primary btn-xs" type="button">Use Folder</button>
+            </div>
+          </div>
+          <div id="dirList" class="dir-list"></div>
+          <div class="mkdir-row">
+            <input id="newDirInput" type="text" placeholder="New folder name..." />
+            <button id="createDirBtn" class="btn-secondary btn-xs" type="button">+ Create</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <label class="toggle-row">
+            <span>Organize into folders by channel</span>
+            <input id="groupByChannelInput" type="checkbox" checked />
+          </label>
+          <div id="pathPreview" class="preview-text"></div>
+        </div>
+
+        <div class="quality-row">
+          <span class="muted">Video Quality</span>
+          <select id="qualitySelect">
+            <option value="best">Best MP4 (Recommended)</option>
+            <option value="1080">Up to 1080p</option>
+            <option value="720">Up to 720p</option>
+          </select>
+        </div>
+
+        <div id="settingsMsg" class="save-indicator"></div>
+      </section>
+
+      <footer class="footer">
+        <span>Close window to keep running in Menu Bar</span>
+        <button id="guideBtn" class="link-btn" type="button">Extension Guide</button>
+      </footer>
+    </div>
+
+    <!-- EXTENSION GUIDE MODAL -->
+    <div id="guideModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <strong>Install Chrome Extension</strong>
+          <button id="closeGuideBtn" class="btn-ghost" type="button">Close</button>
+        </div>
+        <ol class="guide-steps">
+          <li>Download &amp; unzip <code>yt-cloud-saver-extension.zip</code>.</li>
+          <li>Open <code>chrome://extensions</code> in Chrome and turn on <strong>Developer mode</strong> (top right).</li>
+          <li>Click <strong>Load unpacked</strong> and select the unzipped folder.</li>
+          <li>Open any YouTube video and click <strong>Save to Cloud</strong>!</li>
+        </ol>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

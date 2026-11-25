@@ -1,0 +1,13 @@
+{
+  "name": "yt-cloud-saver-server",
+  "version": "1.0.0",
+  "description": "Local companion server for YT Cloud Saver using yt-dlp and rclone",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
