@@ -30,6 +30,14 @@
         </div>
       </div>
 
+      <div id="updateBanner" class="setup-banner hidden" style="margin:8px 16px 0;border-color:rgba(59,130,246,0.45);background:rgba(59,130,246,0.12)">
+        <div>
+          <div id="updateTitle" class="banner-title">Update available</div>
+          <div id="updateSub" class="banner-sub">A new version is ready to install.</div>
+        </div>
+        <button id="installUpdateBtn" class="btn-primary btn-xs" type="button">Update &amp; Restart</button>
+      </div>
+
       <nav class="tabs">
         <button id="tabActivity" class="tab active" type="button">Activity</button>
         <button id="tabSettings" class="tab" type="button">Cloud &amp; Settings</button>
@@ -250,6 +258,7 @@
       <footer class="footer">
         <span>Close window to keep running in Menu Bar</span>
         <div class="btn-group">
+          <button id="checkUpdateBtn" class="link-btn" type="button">↻ Updates</button>
           <button id="supportBtn" class="link-btn" type="button">☕ Support</button>
           <button id="guideBtn" class="link-btn" type="button">Extension Guide</button>
         </div>

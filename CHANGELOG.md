@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.7] - 2026-11-26
+
+### Added
+- **1-Click In-App Auto-Updater (`tauri-plugin-updater`):** Desktop App now automatically checks GitHub Releases (`latest.json`) on startup (plus a `↻ Updates` button in the footer) and offers an **Update & Restart** banner to download, verify, install, and relaunch seamlessly without manually opening `.dmg`/`.exe` installers.
+
 ## [1.2.6] - 2026-11-26
 
 ### Fixed

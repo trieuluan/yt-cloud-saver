@@ -72,10 +72,12 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
           releaseName: 'YT Cloud Saver ${{ github.ref_name }}'
           releaseBody: 'Download the Desktop installer for your OS and yt-cloud-saver-extension.zip.'
+          includeUpdaterJson: true
           releaseDraft: true
           prerelease: false

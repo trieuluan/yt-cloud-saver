@@ -75,6 +75,11 @@ const closeGuideBtn = document.getElementById('closeGuideBtn');
 const supportBtn = document.getElementById('supportBtn');
 const supportModal = document.getElementById('supportModal');
 const closeSupportBtn = document.getElementById('closeSupportBtn');
+const checkUpdateBtn = document.getElementById('checkUpdateBtn');
+const updateBanner = document.getElementById('updateBanner');
+const updateTitle = document.getElementById('updateTitle');
+const updateSub = document.getElementById('updateSub');
+const installUpdateBtn = document.getElementById('installUpdateBtn');
 const openExtFolderBtn = document.getElementById('openExtFolderBtn');
 const openChromeExtBtn = document.getElementById('openChromeExtBtn');
 const guideError = document.getElementById('guideError');
@@ -775,6 +780,52 @@ closeSupportBtn.addEventListener('click', () => supportModal.classList.add('hidd
 supportModal.addEventListener('click', (e) => {
   if (e.target === supportModal) supportModal.classList.add('hidden');
 });
+
+async function runUpdateCheck(silent = true) {
+  if (!silent) {
+    checkUpdateBtn.disabled = true;
+    checkUpdateBtn.textContent = 'Checking...';
+  }
+  try {
+    const info = await invoke('check_app_update');
+    if (info && info.version) {
+      updateTitle.textContent = `Update available: v${info.version}`;
+      updateSub.textContent = (info.body || 'Click Update & Restart to install automatically.').split('\n')[0].slice(0, 80);
+      updateBanner.classList.remove('hidden');
+    } else if (!silent) {
+      checkUpdateBtn.textContent = 'Up to date ✓';
+      setTimeout(() => { checkUpdateBtn.textContent = '↻ Updates'; }, 2500);
+    }
+  } catch (err) {
+    if (!silent) {
+      updateTitle.textContent = 'Update check failed';
+      updateSub.textContent = String(err).slice(0, 90);
+      updateBanner.classList.remove('hidden');
+    }
+  } finally {
+    if (!silent) {
+      checkUpdateBtn.disabled = false;
+      if (checkUpdateBtn.textContent === 'Checking...') {
+        checkUpdateBtn.textContent = '↻ Updates';
+      }
+    }
+  }
+}
+
+checkUpdateBtn.addEventListener('click', () => runUpdateCheck(false));
+installUpdateBtn.addEventListener('click', async () => {
+  installUpdateBtn.disabled = true;
+  installUpdateBtn.textContent = 'Updating...';
+  try {
+    await invoke('install_app_update');
+  } catch (err) {
+    installUpdateBtn.disabled = false;
+    installUpdateBtn.textContent = 'Update & Restart';
+    updateSub.textContent = `Update failed: ${err}`;
+  }
+});
+
+setTimeout(() => runUpdateCheck(true), 3500);
 
 loadState();
 setInterval(loadState, 2000);

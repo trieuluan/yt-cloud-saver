@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_updater::UpdaterExt;
 use tools::{
     check_tools, check_whisper_status, connect_google_drive, create_remote_dir,
     download_whisper_model, install_missing_tools, install_whisper_cli, list_remote_dirs,
@@ -235,6 +236,39 @@ async fn restore_subtitles_cloud(state: State<'_, AppState>) -> Result<usize, St
     translate::restore_subtitles_from_cloud(&state.data_dir, &state.bin_dir, &cfg.rclone_remote).await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    version: String,
+    body: Option<String>,
+}
+
+#[tauri::command]
+async fn check_app_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let updater = app.updater().map_err(|e| format!("Updater init failed: {e}"))?;
+    match updater.check().await.map_err(|e| format!("Update check failed: {e}"))? {
+        Some(update) => Ok(Some(UpdateInfo {
+            version: update.version,
+            body: update.body,
+        })),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| format!("Updater init failed: {e}"))?;
+    let Some(update) = updater.check().await.map_err(|e| format!("Update check failed: {e}"))? else {
+        return Err("Already on the latest version".to_string());
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| format!("Install update failed: {e}"))?;
+    state.rclone_serve.stop().await;
+    app.restart();
+}
+
 #[tauri::command]
 async fn save_url(state: State<'_, AppState>, url: String) -> Result<Job, String> {
     let trimmed = url.trim().to_string();
@@ -275,6 +309,7 @@ fn hide_main_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -368,6 +403,8 @@ pub fn run() {
             delete_subtitle_cache,
             backup_subtitles_cloud,
             restore_subtitles_cloud,
+            check_app_update,
+            install_app_update,
             save_url,
             sync_cloud_ids,
             download_missing_tools,
