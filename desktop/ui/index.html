@@ -24,7 +24,10 @@
 
       <div id="sysDrawer" class="sys-drawer hidden">
         <div id="toolsRow" class="tools-row"></div>
-        <span class="muted">127.0.0.1:4873</span>
+        <div class="sys-actions">
+          <button id="installToolsBtn" class="btn-primary btn-xs hidden" type="button">Download Missing Tools</button>
+          <span class="muted">127.0.0.1:4873</span>
+        </div>
       </div>
 
       <nav class="tabs">
@@ -119,6 +122,18 @@
           </select>
         </div>
 
+        <div class="quality-row">
+          <span class="muted">Browser Cookies (restricted videos)</span>
+          <select id="cookiesSelect">
+            <option value="">Off</option>
+            <option value="chrome">Google Chrome</option>
+            <option value="brave">Brave</option>
+            <option value="edge">Microsoft Edge</option>
+            <option value="safari">Safari</option>
+            <option value="firefox">Firefox</option>
+          </select>
+        </div>
+
         <div id="settingsMsg" class="save-indicator"></div>
       </section>
 
@@ -136,11 +151,16 @@
           <button id="closeGuideBtn" class="btn-ghost" type="button">Close</button>
         </div>
         <ol class="guide-steps">
-          <li>Download &amp; unzip <code>yt-cloud-saver-extension.zip</code>.</li>
-          <li>Open <code>chrome://extensions</code> in Chrome and turn on <strong>Developer mode</strong> (top right).</li>
-          <li>Click <strong>Load unpacked</strong> and select the unzipped folder.</li>
+          <li>Click <strong>Open Extension Folder</strong> below.</li>
+          <li>Click <strong>Open chrome://extensions</strong> and turn on <strong>Developer mode</strong> (top right).</li>
+          <li>Drag &amp; drop the <code>extension</code> folder onto the Chrome Extensions page (or click <strong>Load unpacked</strong>).</li>
           <li>Open any YouTube video and click <strong>Save to Cloud</strong>!</li>
         </ol>
+        <div class="guide-actions">
+          <button id="openExtFolderBtn" class="btn-primary" type="button">1. Open Extension Folder</button>
+          <button id="openChromeExtBtn" class="btn-secondary" type="button">2. Open chrome://extensions</button>
+        </div>
+        <p id="guideError" class="error-text hidden"></p>
       </div>
     </div>
 

@@ -419,7 +419,7 @@ impl JobManager {
 
         let result = tokio::select! {
             _ = &mut rx => Err("Cancelled".to_string()),
-            res = self.execute_pipeline(&job, &job_dir) => res,
+            res = self.execute_pipeline(&job, &job_dir, &config.cookies_browser) => res,
         };
 
         {
@@ -490,9 +490,9 @@ impl JobManager {
         });
     }
 
-    async fn execute_pipeline(&self, job: &Job, job_dir: &Path) -> Result<(), String> {
+    async fn execute_pipeline(&self, job: &Job, job_dir: &Path, cookies_browser: &str) -> Result<(), String> {
         verify_remote_ready(&self.bin_dir, &job.remote).await?;
-        let file_path = self.download_video(job, job_dir).await?;
+        let file_path = self.download_video(job, job_dir, cookies_browser).await?;
         let file_name = file_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -511,24 +511,31 @@ impl JobManager {
         self.upload_to_cloud(job, &file_path).await
     }
 
-    async fn download_video(&self, job: &Job, job_dir: &Path) -> Result<PathBuf, String> {
+    async fn download_video(&self, job: &Job, job_dir: &Path, cookies_browser: &str) -> Result<PathBuf, String> {
         let ytdlp = find_binary("yt-dlp", &self.bin_dir)
             .ok_or_else(|| "yt-dlp is not installed".to_string())?;
         let template = job_dir.join("%(title).120B [%(id)s].%(ext)s");
+        let template_str = template.to_string_lossy().to_string();
+
+        let mut args: Vec<String> = vec![
+            "--newline".into(),
+            "--no-playlist".into(),
+            "--windows-filenames".into(),
+            "-f".into(),
+            format_selector(&job.quality).into(),
+            "--merge-output-format".into(),
+            "mp4".into(),
+            "-o".into(),
+            template_str,
+        ];
+        if !cookies_browser.is_empty() {
+            args.push("--cookies-from-browser".into());
+            args.push(cookies_browser.to_string());
+        }
+        args.push(job.url.clone());
 
         let mut child = Command::new(ytdlp)
-            .args([
-                "--newline",
-                "--no-playlist",
-                "--windows-filenames",
-                "-f",
-                format_selector(&job.quality),
-                "--merge-output-format",
-                "mp4",
-                "-o",
-                &template.to_string_lossy(),
-                &job.url,
-            ])
+            .args(&args)
             .env("PATH", build_env_path(&self.bin_dir))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

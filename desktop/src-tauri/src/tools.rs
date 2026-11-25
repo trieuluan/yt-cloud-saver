@@ -323,3 +323,150 @@ pub async fn connect_google_drive(bin_dir: &Path, remote_name: &str) -> Result<(
     }
     Ok(())
 }
+
+fn make_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+}
+
+async fn download_to_file(url: &str, dest: &Path) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .user_agent("yt-cloud-saver/1.1")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed ({url}): {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {} downloading {url}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    std::fs::write(dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn find_file_recursive(dir: &Path, target_name: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            if let Some(found) = find_file_recursive(&p, target_name) {
+                return Some(found);
+            }
+        } else if p.file_name().and_then(|n| n.to_str()) == Some(target_name) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+async fn extract_binary_from_zip(zip_path: &Path, binary_name: &str, bin_dir: &Path) -> Result<(), String> {
+    let extract_dir = bin_dir.join(format!("_extract_{binary_name}"));
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    std::fs::create_dir_all(&extract_dir).map_err(|e| e.to_string())?;
+
+    let status = if cfg!(windows) {
+        Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+                    zip_path.display(),
+                    extract_dir.display()
+                ),
+            ])
+            .status()
+            .await
+    } else {
+        Command::new("unzip")
+            .args(["-o", &zip_path.to_string_lossy(), "-d", &extract_dir.to_string_lossy()])
+            .status()
+            .await
+    }
+    .map_err(|e| format!("Failed to extract archive: {e}"))?;
+
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&extract_dir);
+        return Err(format!("Archive extraction exited with {status}"));
+    }
+
+    let exe_name = if cfg!(windows) {
+        format!("{binary_name}.exe")
+    } else {
+        binary_name.to_string()
+    };
+    let found = find_file_recursive(&extract_dir, &exe_name)
+        .ok_or_else(|| format!("{exe_name} not found inside downloaded archive"))?;
+    let dest = bin_dir.join(&exe_name);
+    std::fs::copy(&found, &dest).map_err(|e| e.to_string())?;
+    make_executable(&dest);
+
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    let _ = std::fs::remove_file(zip_path);
+    Ok(())
+}
+
+pub async fn install_missing_tools(bin_dir: &Path) -> Result<ToolsStatus, String> {
+    std::fs::create_dir_all(bin_dir).map_err(|e| e.to_string())?;
+
+    if find_binary("yt-dlp", bin_dir).is_none() {
+        let url = if cfg!(target_os = "macos") {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+        } else if cfg!(target_os = "windows") {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+        } else {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        };
+        let exe_name = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+        let dest = bin_dir.join(exe_name);
+        download_to_file(url, &dest).await?;
+        make_executable(&dest);
+    }
+
+    if find_binary("rclone", bin_dir).is_none() {
+        let url = if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                "https://downloads.rclone.org/rclone-current-osx-arm64.zip"
+            } else {
+                "https://downloads.rclone.org/rclone-current-osx-amd64.zip"
+            }
+        } else if cfg!(target_os = "windows") {
+            "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
+        } else {
+            "https://downloads.rclone.org/rclone-current-linux-amd64.zip"
+        };
+        let zip_path = bin_dir.join("rclone.zip");
+        download_to_file(url, &zip_path).await?;
+        extract_binary_from_zip(&zip_path, "rclone", bin_dir).await?;
+    }
+
+    if find_binary("ffmpeg", bin_dir).is_none() {
+        if cfg!(target_os = "macos") {
+            let zip_path = bin_dir.join("ffmpeg.zip");
+            download_to_file("https://evermeet.cx/ffmpeg/getrelease/zip", &zip_path).await?;
+            extract_binary_from_zip(&zip_path, "ffmpeg", bin_dir).await?;
+        } else if cfg!(target_os = "windows") {
+            let zip_path = bin_dir.join("ffmpeg.zip");
+            download_to_file(
+                "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+                &zip_path,
+            )
+            .await?;
+            extract_binary_from_zip(&zip_path, "ffmpeg", bin_dir).await?;
+        } else {
+            return Err("On Linux, please install ffmpeg via your package manager (e.g. sudo apt install ffmpeg).".to_string());
+        }
+    }
+
+    Ok(check_tools(bin_dir).await)
+}

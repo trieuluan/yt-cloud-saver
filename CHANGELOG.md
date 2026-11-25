@@ -2,6 +2,13 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.1.0] - 2026-11-25
+
+### Added
+- **In-App Tool Downloader:** Automatically detects missing `yt-dlp`, `ffmpeg`, or `rclone` and adds a 1-click **Download Missing Tools** button right inside the Desktop App (no Terminal required).
+- **Bundled Chrome Extension & Quick Opener:** Bundles `extension/` inside the Desktop App and adds **1. Open Extension Folder** (reveals & highlights the `extension` folder in Finder/Explorer) + **2. Open `chrome://extensions`** inside the Extension Guide.
+- **Browser Cookies Option:** Added **Browser Cookies (restricted videos)** setting (`Google Chrome`, `Brave`, `Edge`, `Safari`, `Firefox`) passing `--cookies-from-browser` to `yt-dlp` for age-restricted or account-gated videos.
+
 ## [1.0.0] - 2026-11-25
 
 ### Added

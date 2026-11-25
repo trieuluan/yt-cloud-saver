@@ -3,6 +3,7 @@ const { invoke } = window.__TAURI__.core;
 const sysBtn = document.getElementById('sysBtn');
 const sysDrawer = document.getElementById('sysDrawer');
 const toolsRow = document.getElementById('toolsRow');
+const installToolsBtn = document.getElementById('installToolsBtn');
 const tabActivity = document.getElementById('tabActivity');
 const tabSettings = document.getElementById('tabSettings');
 const viewActivity = document.getElementById('viewActivity');
@@ -35,11 +36,15 @@ const createDirBtn = document.getElementById('createDirBtn');
 const groupByChannelInput = document.getElementById('groupByChannelInput');
 const pathPreview = document.getElementById('pathPreview');
 const qualitySelect = document.getElementById('qualitySelect');
+const cookiesSelect = document.getElementById('cookiesSelect');
 const settingsMsg = document.getElementById('settingsMsg');
 
 const guideBtn = document.getElementById('guideBtn');
 const guideModal = document.getElementById('guideModal');
 const closeGuideBtn = document.getElementById('closeGuideBtn');
+const openExtFolderBtn = document.getElementById('openExtFolderBtn');
+const openChromeExtBtn = document.getElementById('openChromeExtBtn');
+const guideError = document.getElementById('guideError');
 
 const ACTIVE_STATUSES = new Set(['queued', 'downloading', 'uploading']);
 let detectedRemotes = [];
@@ -94,6 +99,10 @@ function renderTools(tools = {}) {
   const allOk = items.every(([, ok]) => ok);
   sysBtn.textContent = allOk ? 'Engine: OK ▾' : 'Engine: Missing ▾';
   sysBtn.classList.toggle('warn', !allOk);
+  installToolsBtn.classList.toggle('hidden', allOk);
+  if (!allOk) {
+    sysDrawer.classList.remove('hidden');
+  }
 
   toolsRow.innerHTML = items
     .map(
@@ -169,6 +178,7 @@ async function persistSettings() {
         rcloneRemote: remoteInput.value.trim(),
         groupByChannel: groupByChannelInput.checked,
         quality: qualitySelect.value,
+        cookiesBrowser: cookiesSelect.value,
       },
     });
     settingsMsg.textContent = '✓ Settings auto-saved';
@@ -214,6 +224,7 @@ async function loadState() {
       if (!remoteInput.matches(':focus')) remoteInput.value = data.config.rcloneRemote || '';
       groupByChannelInput.checked = Boolean(data.config.groupByChannel);
       qualitySelect.value = data.config.quality || 'best';
+      cookiesSelect.value = data.config.cookiesBrowser || '';
       updatePathPreview();
     }
 
@@ -311,6 +322,42 @@ groupByChannelInput.addEventListener('change', () => {
   persistSettings();
 });
 qualitySelect.addEventListener('change', persistSettings);
+cookiesSelect.addEventListener('change', persistSettings);
+
+installToolsBtn.addEventListener('click', async () => {
+  installToolsBtn.disabled = true;
+  installToolsBtn.textContent = 'Downloading...';
+  try {
+    await invoke('download_missing_tools');
+    await loadState();
+  } catch (err) {
+    connectHint.classList.remove('hidden');
+    connectHint.textContent = `Tool download failed: ${err}`;
+  } finally {
+    installToolsBtn.disabled = false;
+    installToolsBtn.textContent = 'Download Missing Tools';
+  }
+});
+
+openExtFolderBtn.addEventListener('click', async () => {
+  guideError.classList.add('hidden');
+  try {
+    await invoke('open_extension_folder');
+  } catch (err) {
+    guideError.textContent = String(err);
+    guideError.classList.remove('hidden');
+  }
+});
+
+openChromeExtBtn.addEventListener('click', async () => {
+  guideError.classList.add('hidden');
+  try {
+    await invoke('open_chrome_extensions');
+  } catch (err) {
+    guideError.textContent = String(err);
+    guideError.classList.remove('hidden');
+  }
+});
 
 jobsList.addEventListener('click', async (e) => {
   const cancelId = e.target.getAttribute('data-cancel');

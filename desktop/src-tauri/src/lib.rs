@@ -12,7 +12,10 @@ use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, RunEvent, State, WindowEvent};
-use tools::{check_tools, connect_google_drive, create_remote_dir, list_remote_dirs, list_remotes, ToolsStatus};
+use tools::{
+    check_tools, connect_google_drive, create_remote_dir, install_missing_tools, list_remote_dirs,
+    list_remotes, ToolsStatus,
+};
 
 pub struct AppState {
     pub data_dir: PathBuf,
@@ -53,6 +56,65 @@ async fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardStat
 #[tauri::command]
 async fn sync_cloud_ids(state: State<'_, AppState>) -> Result<SavedIdsCache, String> {
     state.jobs.sync_from_cloud().await
+}
+
+#[tauri::command]
+async fn download_missing_tools(state: State<'_, AppState>) -> Result<ToolsStatus, String> {
+    install_missing_tools(&state.bin_dir).await
+}
+
+#[tauri::command]
+async fn open_extension_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let mut candidates = vec![];
+    if let Ok(res_dir) = app.path().resource_dir() {
+        candidates.push(res_dir.join("extension"));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("extension"));
+        candidates.push(cwd.join("../../extension"));
+    }
+    let ext_dir = candidates
+        .into_iter()
+        .find(|p| p.join("manifest.json").is_file())
+        .ok_or_else(|| "Bundled extension folder not found".to_string())?;
+
+    let status = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").args(["-R", &ext_dir.to_string_lossy()]).status()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", ext_dir.display()))
+            .status()
+    } else {
+        let parent = ext_dir.parent().unwrap_or(&ext_dir);
+        std::process::Command::new("xdg-open").arg(parent).status()
+    }
+    .map_err(|e| format!("Failed to open folder: {e}"))?;
+
+    if !status.success() {
+        return Err("Could not open extension folder".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_chrome_extensions() -> Result<(), String> {
+    let res = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+            .args(["-a", "Google Chrome", "chrome://extensions"])
+            .status()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "chrome", "chrome://extensions"])
+            .status()
+    } else {
+        std::process::Command::new("google-chrome")
+            .arg("chrome://extensions")
+            .status()
+    };
+    match res {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err("Could not launch Chrome. Please open chrome://extensions manually.".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -213,7 +275,10 @@ pub fn run() {
             cancel_job,
             delete_job,
             save_url,
-            sync_cloud_ids
+            sync_cloud_ids,
+            download_missing_tools,
+            open_extension_folder,
+            open_chrome_extensions
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

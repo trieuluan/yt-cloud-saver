@@ -10,6 +10,8 @@ pub struct AppConfig {
     pub rclone_remote: String,
     pub group_by_channel: bool,
     pub quality: String,
+    #[serde(default)]
+    pub cookies_browser: String,
     pub max_concurrent: usize,
     pub keep_local: bool,
     pub temp_dir: String,
@@ -27,6 +29,7 @@ impl Default for AppConfig {
             rclone_remote: "gdrive:YouTube Saved".to_string(),
             group_by_channel: true,
             quality: "best".to_string(),
+            cookies_browser: String::new(),
             max_concurrent: 2,
             keep_local: false,
             temp_dir,
@@ -40,6 +43,7 @@ pub struct ConfigPatch {
     pub rclone_remote: Option<String>,
     pub group_by_channel: Option<bool>,
     pub quality: Option<String>,
+    pub cookies_browser: Option<String>,
     pub max_concurrent: Option<usize>,
     pub keep_local: Option<bool>,
 }
@@ -69,6 +73,9 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(quality) = patch.quality {
         cfg.quality = quality;
+    }
+    if let Some(cookies) = patch.cookies_browser {
+        cfg.cookies_browser = cookies.trim().to_string();
     }
     if let Some(max_c) = patch.max_concurrent {
         cfg.max_concurrent = max_c.clamp(1, 4);
