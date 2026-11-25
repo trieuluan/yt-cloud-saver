@@ -1,6 +1,47 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProfile {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+fn default_ai_profiles() -> HashMap<String, AiProfile> {
+    let mut map = HashMap::new();
+    map.insert(
+        "gemini".to_string(),
+        AiProfile {
+            base_url: String::new(),
+            api_key: String::new(),
+            model: "gemini-3.8-flash".to_string(),
+        },
+    );
+    map.insert(
+        "openai".to_string(),
+        AiProfile {
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: String::new(),
+            model: "gpt-4o-mini".to_string(),
+        },
+    );
+    map.insert(
+        "ollama".to_string(),
+        AiProfile {
+            base_url: "http://localhost:11434/v1".to_string(),
+            api_key: String::new(),
+            model: "qwen2.5:14b".to_string(),
+        },
+    );
+    map
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,9 +53,45 @@ pub struct AppConfig {
     pub quality: String,
     #[serde(default)]
     pub cookies_browser: String,
+    #[serde(default = "default_ai_provider")]
+    pub ai_provider: String,
+    #[serde(default)]
+    pub ai_base_url: String,
+    #[serde(default)]
+    pub ai_api_key: String,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+    #[serde(default = "default_ai_profiles")]
+    pub ai_profiles: HashMap<String, AiProfile>,
+    #[serde(default = "default_target_lang")]
+    pub target_lang: String,
+    #[serde(default = "default_true")]
+    pub use_whisper_fallback: bool,
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
+    #[serde(default)]
+    pub prefer_whisper_over_auto_cc: bool,
+    #[serde(default)]
+    pub embed_subtitles: bool,
     pub max_concurrent: usize,
     pub keep_local: bool,
     pub temp_dir: String,
+}
+
+fn default_ai_provider() -> String {
+    "gemini".to_string()
+}
+fn default_ai_model() -> String {
+    "gemini-3.8-flash".to_string()
+}
+fn default_target_lang() -> String {
+    "Vietnamese".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_whisper_model() -> String {
+    "small".to_string()
 }
 
 impl Default for AppConfig {
@@ -30,6 +107,16 @@ impl Default for AppConfig {
             group_by_channel: true,
             quality: "best".to_string(),
             cookies_browser: String::new(),
+            ai_provider: default_ai_provider(),
+            ai_base_url: String::new(),
+            ai_api_key: String::new(),
+            ai_model: default_ai_model(),
+            ai_profiles: default_ai_profiles(),
+            target_lang: default_target_lang(),
+            use_whisper_fallback: true,
+            whisper_model: default_whisper_model(),
+            prefer_whisper_over_auto_cc: false,
+            embed_subtitles: false,
             max_concurrent: 2,
             keep_local: false,
             temp_dir,
@@ -44,6 +131,16 @@ pub struct ConfigPatch {
     pub group_by_channel: Option<bool>,
     pub quality: Option<String>,
     pub cookies_browser: Option<String>,
+    pub ai_provider: Option<String>,
+    pub ai_base_url: Option<String>,
+    pub ai_api_key: Option<String>,
+    pub ai_model: Option<String>,
+    pub ai_profiles: Option<HashMap<String, AiProfile>>,
+    pub target_lang: Option<String>,
+    pub use_whisper_fallback: Option<bool>,
+    pub whisper_model: Option<String>,
+    pub prefer_whisper_over_auto_cc: Option<bool>,
+    pub embed_subtitles: Option<bool>,
     pub max_concurrent: Option<usize>,
     pub keep_local: Option<bool>,
 }
@@ -76,6 +173,51 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(cookies) = patch.cookies_browser {
         cfg.cookies_browser = cookies.trim().to_string();
+    }
+    if let Some(profiles) = patch.ai_profiles {
+        for (k, v) in profiles {
+            cfg.ai_profiles.insert(
+                k,
+                AiProfile {
+                    base_url: v.base_url.trim().trim_end_matches('/').to_string(),
+                    api_key: v.api_key.trim().to_string(),
+                    model: v.model.trim().to_string(),
+                },
+            );
+        }
+    }
+    if let Some(prov) = patch.ai_provider {
+        cfg.ai_provider = prov.trim().to_string();
+    }
+    if let Some(url) = patch.ai_base_url {
+        let clean = url.trim().trim_end_matches('/').to_string();
+        cfg.ai_base_url = clean.clone();
+        cfg.ai_profiles.entry(cfg.ai_provider.clone()).or_default().base_url = clean;
+    }
+    if let Some(key) = patch.ai_api_key {
+        let clean = key.trim().to_string();
+        cfg.ai_api_key = clean.clone();
+        cfg.ai_profiles.entry(cfg.ai_provider.clone()).or_default().api_key = clean;
+    }
+    if let Some(model) = patch.ai_model {
+        let clean = model.trim().to_string();
+        cfg.ai_model = clean.clone();
+        cfg.ai_profiles.entry(cfg.ai_provider.clone()).or_default().model = clean;
+    }
+    if let Some(lang) = patch.target_lang {
+        cfg.target_lang = lang.trim().to_string();
+    }
+    if let Some(w) = patch.use_whisper_fallback {
+        cfg.use_whisper_fallback = w;
+    }
+    if let Some(wm) = patch.whisper_model {
+        cfg.whisper_model = wm.trim().to_string();
+    }
+    if let Some(pw) = patch.prefer_whisper_over_auto_cc {
+        cfg.prefer_whisper_over_auto_cc = pw;
+    }
+    if let Some(embed) = patch.embed_subtitles {
+        cfg.embed_subtitles = embed;
     }
     if let Some(max_c) = patch.max_concurrent {
         cfg.max_concurrent = max_c.clamp(1, 4);

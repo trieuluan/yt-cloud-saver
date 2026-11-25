@@ -2,6 +2,22 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.0] - 2026-11-26
+
+### Added
+- **AI Subtitles & Whisper Transcription:**
+  - In-app AI translation (`Gemini` / `OpenAI`) with YouTube transcript extraction and local `whisper.cpp` fallback (model manager + chunked 30-minute processing + progressive subtitle loading).
+  - Subtitle caching with `Export .srt ▾` dropdown (**Translated**, **Original**, **Bilingual**) and Google Drive **Backup / Restore** (`_ytcs_subtitles`) + auto-backup after translation.
+- **Native Edge Neural TTS Dubbing:**
+  - Built-in Rust Edge TTS WebSocket client (`vi-VN-HoaiMyNeural`, `vi-VN-NamMinhNeural`, `en-US-AriaNeural`, `en-US-GuyNeural`, plus Browser TTS fallback) with `/tts` & `/tts/prepare` batch pre-buffering, sliding RAM window, and automatic 100 MB / 3-day disk cache cleanup.
+  - Configurable **Dubbing Voice**, **Dubbing Speed**, and **Original Volume** in the Extension Popup.
+- **Redesigned Extension & YouTube Player UX:**
+  - Two-tab Extension Popup (`Subtitles & Dub` + `Cloud & Jobs`) with real-time 2-way **Display Mode** sync, subtitle size/color/background/opacity customizer, and live preview.
+  - Native **AI CC** + **Dub** controls integrated into YouTube's `.ytp-right-controls` bar (with `Option/Alt + C` & `Option/Alt + D` shortcuts) and auto-positioning subtitles when controls hide.
+  - Single **`Saved ✓ ▾`** action menu (**Play from Cloud** inline inside YouTube, **Re-save / Update**, **Remove from Cloud**).
+- **Fast Cloud Streaming Player:**
+  - Upgraded `player.html` with a YouTube-style control bar, keyboard shortcuts, AI CC + Edge TTS dubbing, and fast `rclone serve http` range streaming with zero disk caching and 15-minute idle auto-stop.
+
 ## [1.1.0] - 2026-11-25
 
 ### Added

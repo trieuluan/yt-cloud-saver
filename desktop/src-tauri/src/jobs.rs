@@ -1,5 +1,6 @@
 use crate::config::{load_config, AppConfig};
 use crate::tools::{build_env_path, find_binary, scan_remote_videos, verify_remote_ready, CloudFileInfo};
+use crate::translate::{translate_video_subtitles, write_srt_file};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,8 @@ const MAX_HISTORY: usize = 100;
 #[serde(rename_all = "camelCase")]
 pub struct Job {
     pub id: String,
+    #[serde(default = "default_job_kind")]
+    pub kind: String, // "cloud" | "translate"
     pub url: String,
     pub video_id: Option<String>,
     pub title: String,
@@ -32,6 +35,10 @@ pub struct Job {
     pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_job_kind() -> String {
+    "cloud".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,6 +206,46 @@ impl JobManager {
         self.inner.lock().await.saved_files.get(video_id).cloned()
     }
 
+    pub async fn remove_saved_video(&self, video_id: &str) -> Result<(), String> {
+        let file_info = self.get_saved_file(video_id).await;
+        if let Some(info) = file_info {
+            let rclone_bin = find_binary("rclone", &self.bin_dir)
+                .ok_or_else(|| "rclone binary not found".to_string())?;
+            let out = Command::new(rclone_bin)
+                .env("PATH", build_env_path(&self.bin_dir))
+                .args(["deletefile", &info.remote_path])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to run rclone deletefile: {e}"))?;
+            if !out.status.success() {
+                let err_txt = String::from_utf8_lossy(&out.stderr);
+                if !err_txt.to_lowercase().contains("not found") {
+                    return Err(format!("rclone deletefile failed: {}", err_txt.trim()));
+                }
+            }
+        }
+
+        let mut state = self.inner.lock().await;
+        state.saved_ids.remove(video_id);
+        state.saved_files.remove(video_id);
+        for job in state.jobs.iter_mut() {
+            if job.video_id.as_deref() == Some(video_id)
+                && job.kind == "cloud"
+                && job.status == "done"
+            {
+                job.status = "deleted".to_string();
+            }
+        }
+        state.jobs.retain(|j| j.status != "deleted");
+        self.persist_saved_cache_locked(
+            &state.saved_ids,
+            &state.saved_files,
+            &state.last_synced_at,
+        );
+        self.persist_locked(&state.jobs);
+        Ok(())
+    }
+
     pub async fn sync_from_cloud(&self) -> Result<SavedIdsCache, String> {
         let cfg = load_config(&self.data_dir);
         verify_remote_ready(&self.bin_dir, &cfg.rclone_remote).await?;
@@ -289,6 +336,7 @@ impl JobManager {
 
         let job = Job {
             id: Uuid::new_v4().to_string(),
+            kind: "cloud".to_string(),
             url: req.url.clone(),
             video_id: req.video_id,
             title: req.title.unwrap_or(req.url),
@@ -310,6 +358,114 @@ impl JobManager {
         drop(state);
 
         self.pump().await;
+        job
+    }
+
+    pub async fn enqueue_translate(
+        self: &Arc<Self>,
+        url: String,
+        video_id: String,
+        title: String,
+    ) -> Job {
+        let config = load_config(&self.data_dir);
+        let mut state = self.inner.lock().await;
+
+        if let Some(existing) = state.jobs.iter().find(|j| {
+            j.kind == "translate"
+                && j.video_id.as_deref() == Some(video_id.as_str())
+                && is_active(&j.status)
+        }) {
+            return existing.clone();
+        }
+
+        let now = Utc::now().to_rfc3339();
+        let job = Job {
+            id: Uuid::new_v4().to_string(),
+            kind: "translate".to_string(),
+            url: url.clone(),
+            video_id: Some(video_id.clone()),
+            title: if title.is_empty() { url.clone() } else { title.clone() },
+            channel_name: String::new(),
+            timestamp: 0,
+            quality: config.target_lang.clone(),
+            remote: config.ai_provider.clone(),
+            status: "downloading".to_string(),
+            progress: 5,
+            stage_text: "Starting translation...".to_string(),
+            file_name: None,
+            error: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+
+        state.jobs.insert(0, job.clone());
+        self.persist_locked(&state.jobs);
+        drop(state);
+
+        let mgr = Arc::clone(self);
+        let job_id = job.id.clone();
+        tokio::spawn(async move {
+            let (tx, mut rx) = oneshot::channel::<()>();
+            {
+                let mut st = mgr.inner.lock().await;
+                st.cancels.insert(job_id.clone(), tx);
+            }
+
+            let mgr_prog = Arc::clone(&mgr);
+            let jid_prog = job_id.clone();
+            let handle = tokio::runtime::Handle::current();
+
+            let res = tokio::select! {
+                _ = &mut rx => Err("Cancelled".to_string()),
+                r = translate_video_subtitles(
+                    &mgr.data_dir,
+                    &mgr.bin_dir,
+                    &config,
+                    &url,
+                    &video_id,
+                    &title,
+                    |pct, text| {
+                        let m = Arc::clone(&mgr_prog);
+                        let id = jid_prog.clone();
+                        handle.spawn(async move {
+                            m.update_job(&id, None, Some(pct), Some(text), None, None).await;
+                        });
+                    },
+                ) => r,
+            };
+
+            {
+                let mut st = mgr.inner.lock().await;
+                st.cancels.remove(&job_id);
+            }
+
+            match res {
+                Ok(bundle) => {
+                    mgr.update_job(
+                        &job_id,
+                        Some("done"),
+                        Some(100),
+                        Some(format!("Translated {} lines ({})", bundle.cues.len(), bundle.source)),
+                        None,
+                        None,
+                    )
+                    .await;
+                    let dir = mgr.data_dir.clone();
+                    let bin = mgr.bin_dir.clone();
+                    let remote = load_config(&dir).rclone_remote;
+                    tokio::spawn(async move {
+                        let _ = crate::translate::backup_subtitles_to_cloud(&dir, &bin, &remote).await;
+                    });
+                }
+                Err(err) => {
+                    if err != "Cancelled" {
+                        mgr.update_job(&job_id, Some("error"), None, Some("Failed".into()), None, Some(err))
+                            .await;
+                    }
+                }
+            }
+        });
+
         job
     }
 
@@ -344,6 +500,30 @@ impl JobManager {
             self.persist_locked(&state.jobs);
         }
         removed
+    }
+
+    pub async fn retry(self: &Arc<Self>, id: &str) -> Option<Job> {
+        let old = self.get(id).await?;
+        self.remove(id).await;
+        if old.kind == "translate" {
+            let vid = old.video_id.unwrap_or_default();
+            return Some(self.enqueue_translate(old.url, vid, old.title).await);
+        }
+        Some(
+            self.enqueue(EnqueueRequest {
+                url: old.url,
+                video_id: old.video_id,
+                title: Some(old.title),
+                channel_name: if old.channel_name.is_empty() {
+                    None
+                } else {
+                    Some(old.channel_name)
+                },
+                timestamp: Some(old.timestamp),
+                quality: Some(old.quality),
+            })
+            .await,
+        )
     }
 
     async fn update_job(&self, id: &str, status: Option<&str>, progress: Option<u8>, stage: Option<String>, file_name: Option<String>, error: Option<String>) {
@@ -419,7 +599,7 @@ impl JobManager {
 
         let result = tokio::select! {
             _ = &mut rx => Err("Cancelled".to_string()),
-            res = self.execute_pipeline(&job, &job_dir, &config.cookies_browser) => res,
+            res = self.execute_pipeline(&job, &job_dir, &config) => res,
         };
 
         {
@@ -490,9 +670,66 @@ impl JobManager {
         });
     }
 
-    async fn execute_pipeline(&self, job: &Job, job_dir: &Path, cookies_browser: &str) -> Result<(), String> {
+    async fn execute_pipeline(&self, job: &Job, job_dir: &Path, config: &AppConfig) -> Result<(), String> {
         verify_remote_ready(&self.bin_dir, &job.remote).await?;
-        let file_path = self.download_video(job, job_dir, cookies_browser).await?;
+        let file_path = self.download_video(job, job_dir, &config.cookies_browser).await?;
+
+        if config.embed_subtitles {
+            if let Some(ref vid) = job.video_id {
+                self.update_job(
+                    &job.id,
+                    None,
+                    Some(99),
+                    Some("Translating & embedding subtitles...".into()),
+                    None,
+                    None,
+                )
+                .await;
+                if let Ok(bundle) = translate_video_subtitles(
+                    &self.data_dir,
+                    &self.bin_dir,
+                    config,
+                    &job.url,
+                    vid,
+                    &job.title,
+                    |_, _| {},
+                )
+                .await
+                {
+                    let srt_path = job_dir.join("sub.srt");
+                    let subbed_path = job_dir.join(
+                        file_path
+                            .file_name()
+                            .map(|n| format!("sub_{}", n.to_string_lossy()))
+                            .unwrap_or_else(|| "sub_video.mp4".to_string()),
+                    );
+                    if write_srt_file(&bundle, &srt_path).is_ok() {
+                        if let Some(ffmpeg) = find_binary("ffmpeg", &self.bin_dir) {
+                            let status = Command::new(ffmpeg)
+                                .args([
+                                    "-y",
+                                    "-i",
+                                    &file_path.to_string_lossy(),
+                                    "-i",
+                                    &srt_path.to_string_lossy(),
+                                    "-c",
+                                    "copy",
+                                    "-c:s",
+                                    "mov_text",
+                                    &subbed_path.to_string_lossy(),
+                                ])
+                                .status()
+                                .await;
+                            if matches!(status, Ok(s) if s.success()) && subbed_path.is_file() {
+                                let _ = fs::remove_file(&file_path);
+                                let _ = fs::rename(&subbed_path, &file_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let file_name = file_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())

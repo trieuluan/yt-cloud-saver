@@ -10,6 +10,13 @@ pub struct ToolsStatus {
     pub rclone: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperStatus {
+    pub cli_installed: bool,
+    pub downloaded_models: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RcloneItem {
     #[serde(rename = "Path")]
@@ -106,30 +113,6 @@ pub async fn scan_remote_videos(
         }
     }
     Ok(map)
-}
-
-pub async fn read_remote_range(
-    bin_dir: &Path,
-    remote_file: &str,
-    offset: u64,
-    count: u64,
-) -> Result<Vec<u8>, String> {
-    let rclone = find_binary("rclone", bin_dir)
-        .ok_or_else(|| "rclone is not installed".to_string())?;
-
-    let off_str = offset.to_string();
-    let cnt_str = count.to_string();
-    let out = Command::new(rclone)
-        .args(["cat", remote_file, "--offset", &off_str, "--count", &cnt_str])
-        .env("PATH", build_env_path(bin_dir))
-        .output()
-        .await
-        .map_err(|e| format!("Failed to stream from rclone: {e}"))?;
-
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    Ok(out.stdout)
 }
 
 pub fn build_env_path(bin_dir: &Path) -> String {
@@ -469,4 +452,112 @@ pub async fn install_missing_tools(bin_dir: &Path) -> Result<ToolsStatus, String
     }
 
     Ok(check_tools(bin_dir).await)
+}
+
+pub fn whisper_models_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("models")
+}
+
+pub fn whisper_model_path(data_dir: &Path, model_name: &str) -> PathBuf {
+    whisper_models_dir(data_dir).join(format!("ggml-{model_name}.bin"))
+}
+
+pub fn check_whisper_status(data_dir: &Path, bin_dir: &Path) -> WhisperStatus {
+    let cli_installed =
+        find_binary("whisper-cli", bin_dir).is_some() || find_binary("whisper", bin_dir).is_some();
+    let models_dir = whisper_models_dir(data_dir);
+    let mut downloaded_models = vec![];
+    for name in [
+        "tiny",
+        "base",
+        "small",
+        "medium",
+        "large-v3-turbo-q5_0",
+        "large-v3-turbo",
+    ] {
+        if models_dir.join(format!("ggml-{name}.bin")).is_file() {
+            downloaded_models.push(name.to_string());
+        }
+    }
+    WhisperStatus {
+        cli_installed,
+        downloaded_models,
+    }
+}
+
+pub async fn install_whisper_cli(bin_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(bin_dir).map_err(|e| e.to_string())?;
+    if find_binary("whisper-cli", bin_dir).is_some() || find_binary("whisper", bin_dir).is_some() {
+        return Ok(());
+    }
+
+    if cfg!(target_os = "macos") {
+        let out = Command::new("brew")
+            .args(["install", "whisper-cpp"])
+            .env("PATH", build_env_path(bin_dir))
+            .output()
+            .await
+            .map_err(|e| format!("Homebrew is required on macOS to install whisper-cpp: {e}"))?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        return Ok(());
+    }
+
+    if cfg!(target_os = "windows") {
+        let zip_path = bin_dir.join("whisper.zip");
+        download_to_file(
+            "https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip",
+            &zip_path,
+        )
+        .await?;
+        extract_binary_from_zip(&zip_path, "whisper-cli", bin_dir).await?;
+        return Ok(());
+    }
+
+    Err("On Linux, please install whisper.cpp (whisper-cli) via your package manager or build from source.".to_string())
+}
+
+pub async fn remove_whisper_cli(bin_dir: &Path) -> Result<(), String> {
+    let exe_name = if cfg!(windows) { "whisper-cli.exe" } else { "whisper-cli" };
+    let local = bin_dir.join(exe_name);
+    if local.is_file() {
+        std::fs::remove_file(&local).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    if cfg!(target_os = "macos") {
+        let out = Command::new("brew")
+            .args(["uninstall", "whisper-cpp"])
+            .env("PATH", build_env_path(bin_dir))
+            .output()
+            .await
+            .map_err(|e| format!("Failed to uninstall whisper-cpp: {e}"))?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        return Ok(());
+    }
+    Ok(())
+}
+
+pub async fn download_whisper_model(data_dir: &Path, model_name: &str) -> Result<(), String> {
+    if !matches!(
+        model_name,
+        "tiny" | "base" | "small" | "medium" | "large-v3-turbo-q5_0" | "large-v3-turbo"
+    ) {
+        return Err("Unsupported Whisper model".to_string());
+    }
+    let models_dir = whisper_models_dir(data_dir);
+    std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    let dest = whisper_model_path(data_dir, model_name);
+    let url = format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin");
+    download_to_file(&url, &dest).await
+}
+
+pub fn remove_whisper_model(data_dir: &Path, model_name: &str) -> Result<(), String> {
+    let path = whisper_model_path(data_dir, model_name);
+    if path.is_file() {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

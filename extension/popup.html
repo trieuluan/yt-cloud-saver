@@ -8,7 +8,10 @@
   <body>
     <header class="header">
       <div class="title-row">
-        <h1>YT Cloud Saver</h1>
+        <div class="brand">
+          <div class="brand-icon">YT</div>
+          <h1>YT Cloud Saver</h1>
+        </div>
         <div class="header-actions">
           <button id="openAppBtn" type="button" class="btn-ghost" title="Bring Desktop App to front">Open App</button>
           <span id="statusBadge" class="badge badge-offline">Checking...</span>
@@ -17,65 +20,166 @@
       <div id="toolsRow" class="tools-row"></div>
     </header>
 
-    <section class="card">
-      <h2>Cloud Destination &amp; Options</h2>
-      <div class="field">
-        <span>Cloud Folder (rclone)</span>
-        <div class="input-with-btn">
-          <input id="remoteInput" type="text" placeholder="gdrive:YouTube Saved" list="remoteSuggestions" />
-          <button id="browseBtn" type="button" class="btn-secondary">Browse</button>
+    <nav class="tabs">
+      <button id="tabSub" type="button" class="tab active">Subtitles &amp; Dub</button>
+      <button id="tabCloud" type="button" class="tab">Cloud &amp; Jobs</button>
+    </nav>
+
+    <!-- SUBTITLES & DUB TAB -->
+    <section id="viewSub" class="view">
+      <div class="field-group">
+        <span class="label-sm">Display Mode</span>
+        <div class="grid-2">
+          <button type="button" class="mode-btn" data-mode="translated">Translated Only</button>
+          <button type="button" class="mode-btn active" data-mode="bilingual">Bilingual (Orig + TR)</button>
         </div>
-        <datalist id="remoteSuggestions"></datalist>
       </div>
 
-      <div id="browserBox" class="browser-box hidden">
-        <div class="browser-header">
-          <span id="browserPath" class="browser-path">gdrive:</span>
-          <div class="browser-actions">
-            <button id="upDirBtn" type="button" class="btn-ghost">.. Up</button>
-            <button id="useDirBtn" type="button" class="btn-primary btn-xs">Use Folder</button>
+      <div class="card space-y">
+        <div class="between">
+          <span class="label-sm">Subtitle Size</span>
+          <strong id="sizeLabel" class="val-sm">18px</strong>
+        </div>
+        <div class="grid-4">
+          <button type="button" class="sz-btn" data-size="14">S</button>
+          <button type="button" class="sz-btn active" data-size="18">M</button>
+          <button type="button" class="sz-btn" data-size="22">L</button>
+          <button type="button" class="sz-btn" data-size="26">XL</button>
+        </div>
+        <input id="sizeSlider" type="range" min="12" max="32" value="18" class="clean-range" />
+      </div>
+
+      <div class="card space-y">
+        <div class="between">
+          <span class="label-sm">Text Color</span>
+          <div class="swatches">
+            <button type="button" class="swatch clr-btn active" data-color="#ffffff" style="background:#ffffff"></button>
+            <button type="button" class="swatch clr-btn" data-color="#fde047" style="background:#fde047"></button>
+            <button type="button" class="swatch clr-btn" data-color="#67e8f9" style="background:#67e8f9"></button>
+            <button type="button" class="swatch clr-btn" data-color="#86efac" style="background:#86efac"></button>
+            <label class="swatch rainbow" title="Custom text color">
+              <input id="textColorPicker" type="color" value="#ffffff" class="sr-only" />
+            </label>
           </div>
         </div>
-        <div id="dirList" class="dir-list"></div>
-        <div class="mkdir-row">
-          <input id="newDirInput" type="text" placeholder="New folder name..." />
-          <button id="createDirBtn" type="button" class="btn-secondary btn-xs">+ Create</button>
+
+        <div class="between">
+          <span class="label-sm">Background</span>
+          <div class="swatches">
+            <button type="button" class="swatch bg-btn active" data-bg="#000000" style="background:#000000"></button>
+            <button type="button" class="swatch bg-btn" data-bg="#111827" style="background:#111827"></button>
+            <button type="button" class="swatch bg-btn" data-bg="#1e1b4b" style="background:#1e1b4b"></button>
+            <label class="swatch rainbow" title="Custom background color">
+              <input id="bgColorPicker" type="color" value="#000000" class="sr-only" />
+            </label>
+          </div>
+        </div>
+
+        <div class="space-y-sm">
+          <div class="between">
+            <span class="label-sm">Background Opacity</span>
+            <strong id="opacityLabel" class="val-sm">80%</strong>
+          </div>
+          <input id="opacitySlider" type="range" min="0" max="100" value="80" class="clean-range" />
         </div>
       </div>
 
-      <label class="checkbox-row">
-        <input id="groupByChannelInput" type="checkbox" checked />
-        <span>Auto-create subfolder by channel name</span>
-      </label>
-      <div id="pathPreview" class="preview-text"></div>
-
-      <div class="row">
-        <label class="field grow">
-          <span>Quality</span>
-          <select id="qualitySelect">
-            <option value="best">Best MP4</option>
-            <option value="1080">Up to 1080p</option>
-            <option value="720">Up to 720p</option>
-          </select>
-        </label>
-        <label class="field grow">
-          <span>Local Server</span>
-          <input id="serverUrlInput" type="text" placeholder="http://127.0.0.1:4873" />
-        </label>
+      <div class="preview-box">
+        <div id="prevOrig" class="prev-orig">After saving a cold beauty in the storm...</div>
+        <div id="prevTr" class="prev-tr">Sau khi cứu mỹ nhân giữa cơn bão...</div>
       </div>
-      <div class="actions-row">
-        <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
-        <span id="settingsMsg" class="hint"></span>
+
+      <div class="card space-y">
+        <div class="between">
+          <span class="label-sm">Dubbing Voice</span>
+          <select id="dubVoiceSelect" class="select-compact">
+            <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
+            <option value="vi-VN-NamMinhNeural">Nam Minh (Nam · Edge AI)</option>
+            <option value="en-US-AriaNeural">Aria (EN · Edge AI)</option>
+            <option value="en-US-GuyNeural">Guy (EN · Edge AI)</option>
+            <option value="browser">Browser TTS (Fallback)</option>
+          </select>
+        </div>
+        <div class="between">
+          <span class="label-sm">Dubbing Speed</span>
+          <select id="dubSpeedSelect" class="select-compact">
+            <option value="0.9">0.9x (Slow)</option>
+            <option value="1.0">1.0x (Natural)</option>
+            <option value="1.1">1.1x (Slightly Fast)</option>
+            <option value="1.2">1.2x (Fast)</option>
+            <option value="1.35">1.35x</option>
+            <option value="1.5">1.5x</option>
+          </select>
+        </div>
+        <div class="between">
+          <span class="label-sm">Original volume during Dub</span>
+          <select id="dubVolSelect" class="select-compact">
+            <option value="0.15">15% (Recommended)</option>
+            <option value="0">0% (Mute)</option>
+            <option value="0.3">30%</option>
+          </select>
+        </div>
       </div>
     </section>
 
-    <section class="card">
-      <div class="section-header">
-        <h2>Jobs</h2>
-        <button id="refreshBtn" class="btn-ghost" title="Refresh">Refresh</button>
+    <!-- CLOUD & JOBS TAB -->
+    <section id="viewCloud" class="view hidden">
+      <div class="card space-y">
+        <div class="field">
+          <span>Cloud Folder (rclone)</span>
+          <div class="input-with-btn">
+            <input id="remoteInput" type="text" placeholder="gdrive:YouTube Saved" list="remoteSuggestions" />
+            <button id="browseBtn" type="button" class="btn-secondary">Browse</button>
+          </div>
+          <datalist id="remoteSuggestions"></datalist>
+        </div>
+
+        <div id="browserBox" class="browser-box hidden">
+          <div class="browser-header">
+            <span id="browserPath" class="browser-path">gdrive:</span>
+            <div class="browser-actions">
+              <button id="upDirBtn" class="btn-ghost" type="button">.. Up</button>
+              <button id="useDirBtn" class="btn-primary btn-xs" type="button">Use Folder</button>
+            </div>
+          </div>
+          <div id="dirList" class="dir-list"></div>
+          <div class="mkdir-row">
+            <input id="newDirInput" type="text" placeholder="New folder name..." />
+            <button id="createDirBtn" class="btn-secondary btn-xs" type="button">+ Create</button>
+          </div>
+        </div>
+
+        <label class="checkbox-row">
+          <input id="groupByChannelInput" type="checkbox" checked />
+          <span>Auto-create subfolder by channel name</span>
+        </label>
+        <div id="pathPreview" class="preview-text"></div>
+
+        <div class="row">
+          <label class="field grow">
+            <span>Quality</span>
+            <select id="qualitySelect">
+              <option value="best">Best MP4</option>
+              <option value="1080">Up to 1080p</option>
+              <option value="720">Up to 720p</option>
+            </select>
+          </label>
+          <label class="field grow">
+            <span>Local Server</span>
+            <input id="serverUrlInput" type="text" placeholder="http://127.0.0.1:4873" />
+          </label>
+        </div>
+        <div id="settingsMsg" class="hint"></div>
       </div>
-      <div id="jobsList" class="jobs-list">
-        <p class="empty">No jobs yet.</p>
+
+      <div class="card">
+        <div class="section-header">
+          <h2>Jobs</h2>
+          <button id="refreshBtn" class="btn-ghost" type="button">Refresh</button>
+        </div>
+        <div id="jobsList" class="jobs-list">
+          <p class="empty">No jobs yet.</p>
+        </div>
       </div>
     </section>
 

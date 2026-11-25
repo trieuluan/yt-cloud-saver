@@ -33,6 +33,7 @@
       <nav class="tabs">
         <button id="tabActivity" class="tab active" type="button">Activity</button>
         <button id="tabSettings" class="tab" type="button">Cloud &amp; Settings</button>
+        <button id="tabAi" class="tab" type="button">AI &amp; Translate</button>
       </nav>
 
       <!-- ACTIVITY VIEW -->
@@ -58,8 +59,19 @@
 
         <div class="sync-bar">
           <span id="syncStatusText" class="muted">Cloud library: 0 videos</span>
-          <button id="syncDriveBtn" class="btn-ghost" type="button">↻ Sync Drive</button>
+          <div class="btn-group">
+            <button id="backupSubsBtn" class="btn-ghost" type="button" title="Backup subtitles to Google Drive">↑ Backup Subs</button>
+            <button id="restoreSubsBtn" class="btn-ghost" type="button" title="Restore subtitles from Google Drive">↓ Restore Subs</button>
+            <button id="syncDriveBtn" class="btn-ghost" type="button">↻ Sync Drive</button>
+          </div>
         </div>
+
+        <div class="filter-bar">
+          <button type="button" class="flt-btn active" data-filter="all">All</button>
+          <button type="button" class="flt-btn" data-filter="cloud">Cloud</button>
+          <button type="button" class="flt-btn" data-filter="translate">Translations</button>
+        </div>
+        <p id="activityHint" class="hint-text hidden" style="margin-top:-4px"></p>
 
         <div id="jobsList" class="jobs-list">
           <p class="empty">No jobs yet. Click "Save to Cloud" on YouTube or paste a link above.</p>
@@ -135,6 +147,104 @@
         </div>
 
         <div id="settingsMsg" class="save-indicator"></div>
+      </section>
+
+      <!-- AI & TRANSLATE VIEW -->
+      <section id="viewAi" class="view hidden">
+        <div class="field">
+          <span>Translation Provider</span>
+          <div class="provider-grid">
+            <button type="button" class="prov-btn active" data-prov="gemini">Gemini</button>
+            <button type="button" class="prov-btn" data-prov="openai">OpenAI / Custom</button>
+            <button type="button" class="prov-btn" data-prov="ollama">Ollama (Local)</button>
+          </div>
+        </div>
+
+        <div class="card ai-card">
+          <div id="aiBaseUrlWrap" class="field hidden">
+            <span>Base URL (e.g. https://api.openai.com/v1)</span>
+            <input id="aiBaseUrlInput" type="text" placeholder="https://api.openai.com/v1" />
+          </div>
+          <div id="aiApiKeyWrap" class="field">
+            <span>API Key</span>
+            <input id="aiApiKeyInput" type="password" placeholder="Paste API key..." />
+          </div>
+          <div class="input-with-btn">
+            <div class="field grow" style="margin-bottom:0">
+              <span>Model</span>
+              <input id="aiModelInput" type="text" placeholder="gemini-3.8-flash" />
+            </div>
+            <button id="fetchModelsBtn" class="btn-secondary" type="button" style="align-self:flex-end" title="List available models">↻ Models</button>
+            <button id="testAiBtn" class="btn-secondary" type="button" style="align-self:flex-end">Test</button>
+          </div>
+          <select id="aiModelSelect" class="hidden"></select>
+          <p id="aiTestMsg" class="hint-text hidden"></p>
+        </div>
+
+        <div class="quality-row">
+          <span class="muted">Target Language</span>
+          <select id="targetLangSelect">
+            <option value="Vietnamese">Vietnamese (Tiếng Việt)</option>
+            <option value="English">English</option>
+            <option value="Japanese">Japanese</option>
+            <option value="Korean">Korean</option>
+            <option value="Chinese">Chinese</option>
+          </select>
+        </div>
+
+        <div class="card ai-card">
+          <label class="toggle-row">
+            <span>Offline Speech-to-Text (whisper.cpp)</span>
+            <input id="whisperFallbackInput" type="checkbox" checked />
+          </label>
+          <div class="preview-text" style="margin-top:0">Used automatically when a video has no YouTube CC.</div>
+          <label class="toggle-row">
+            <span class="muted">Prefer Whisper over YouTube Auto-Captions</span>
+            <input id="preferWhisperInput" type="checkbox" />
+          </label>
+
+          <div class="sub-box">
+            <div>
+              <div class="sub-title">whisper-cli Engine</div>
+              <div id="whisperCliStatus" class="muted">Checking...</div>
+            </div>
+            <div class="btn-group">
+              <button id="whisperCliInstallBtn" class="btn-primary btn-xs" type="button">Install</button>
+              <button id="whisperCliRemoveBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+            </div>
+          </div>
+
+          <div class="sub-box-col">
+            <div class="quality-row">
+              <span class="sub-title">Whisper Model</span>
+              <select id="whisperModelSelect">
+                <option value="tiny">tiny (~75 MB · Fastest)</option>
+                <option value="base">base (~142 MB · Balanced)</option>
+                <option value="small">small (~466 MB · Recommended)</option>
+                <option value="medium">medium (~1.5 GB · High Accuracy)</option>
+                <option value="large-v3-turbo-q5_0">large-v3-turbo-q5_0 (~574 MB · Best Value)</option>
+                <option value="large-v3-turbo">large-v3-turbo FP16 (~1.62 GB · Best Quality)</option>
+              </select>
+            </div>
+            <div class="sub-box-foot">
+              <span id="whisperModelStatus" class="muted">Checking...</span>
+              <div class="btn-group">
+                <button id="whisperModelDlBtn" class="btn-primary btn-xs" type="button">Download</button>
+                <button id="whisperModelRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+              </div>
+            </div>
+          </div>
+          <p id="whisperMsg" class="error-text hidden"></p>
+        </div>
+
+        <div class="card">
+          <label class="toggle-row">
+            <span>Embed translated subtitles (.srt) into saved MP4</span>
+            <input id="embedSubtitlesInput" type="checkbox" />
+          </label>
+        </div>
+
+        <div id="aiSettingsMsg" class="save-indicator"></div>
       </section>
 
       <footer class="footer">

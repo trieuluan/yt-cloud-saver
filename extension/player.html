@@ -15,20 +15,29 @@
         height: 100%;
         background: #000;
         color: #fff;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         overflow: hidden;
+        user-select: none;
+      }
+      .player-wrap {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        outline: none;
       }
       video {
         width: 100%;
         height: 100%;
         object-fit: contain;
         background: #000;
+        cursor: pointer;
       }
       .badge {
-        position: fixed;
-        top: 12px;
-        right: 12px;
-        z-index: 10;
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        z-index: 20;
         background: rgba(15, 17, 21, 0.82);
         border: 1px solid rgba(74, 222, 128, 0.45);
         color: #4ade80;
@@ -39,9 +48,189 @@
         pointer-events: none;
         transition: opacity 0.4s ease;
       }
+      .sub-overlay {
+        position: absolute;
+        left: 8%;
+        right: 8%;
+        bottom: 68px;
+        z-index: 25;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        text-align: center;
+        pointer-events: none;
+        transition: bottom 0.2s ease;
+      }
+      .player-wrap.idle .sub-overlay {
+        bottom: 24px;
+      }
+      .yt-controls {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 30;
+        padding: 24px 14px 10px;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        transition: opacity 0.25s ease, transform 0.25s ease;
+      }
+      .player-wrap.idle .yt-controls {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(6px);
+      }
+      .seek-wrap {
+        position: relative;
+        width: 100%;
+        height: 14px;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      .seek-track {
+        position: relative;
+        width: 100%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.24);
+        border-radius: 999px;
+        overflow: hidden;
+        transition: height 0.12s ease;
+      }
+      .seek-wrap:hover .seek-track {
+        height: 6px;
+      }
+      .seek-buf {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0%;
+        background: rgba(255, 255, 255, 0.35);
+      }
+      .seek-fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0%;
+        background: #ff0033;
+      }
+      .ctrl-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .left-controls,
+      .right-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .pill-cluster {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: rgba(20, 24, 32, 0.76);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        backdrop-filter: blur(10px);
+      }
+      .icon-btn {
+        height: 28px;
+        min-width: 28px;
+        padding: 0 6px;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: #f1f1f1;
+        font-size: 13px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .icon-btn:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .vol-range {
+        width: 64px;
+        accent-color: #ffffff;
+        cursor: pointer;
+      }
+      .time-text {
+        font-size: 12px;
+        color: #e2e8f0;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .bar-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px;
+        border-radius: 999px;
+        background: rgba(18, 22, 30, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        backdrop-filter: blur(10px);
+      }
+      .pill-btn {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: #e2e8f0;
+        font-size: 11.5px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .pill-btn:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .pill-btn[data-state="active"] {
+        background: rgba(168, 85, 247, 0.34);
+        color: #f3e8ff;
+      }
+      .pill-btn[data-state="translated"] {
+        background: rgba(59, 130, 246, 0.34);
+        color: #dbeafe;
+      }
+      .pill-btn[data-state="done"] {
+        background: rgba(34, 197, 94, 0.3);
+        color: #dcfce7;
+      }
+      .pill-btn[data-state="working"] {
+        background: rgba(59, 130, 246, 0.3);
+        color: #dbeafe;
+      }
+      .pill-btn[data-state="error"] {
+        background: rgba(239, 68, 68, 0.3);
+        color: #fecaca;
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.85;
+      }
       .error-box {
         position: fixed;
         inset: 0;
+        z-index: 40;
         display: none;
         flex-direction: column;
         align-items: center;
@@ -65,8 +254,46 @@
     </style>
   </head>
   <body>
-    <div id="badge" class="badge">Playing saved copy from Google Drive</div>
-    <video id="video" controls autoplay playsinline></video>
+    <div id="playerWrap" class="player-wrap" tabindex="0">
+      <div id="badge" class="badge">Playing saved copy from Google Drive</div>
+      <div id="subOverlay" class="sub-overlay"></div>
+      <video id="video" autoplay playsinline></video>
+
+      <div class="yt-controls" id="ytControls">
+        <div class="seek-wrap" id="seekWrap">
+          <div class="seek-track">
+            <div class="seek-buf" id="seekBuf"></div>
+            <div class="seek-fill" id="seekFill"></div>
+          </div>
+        </div>
+        <div class="ctrl-row">
+          <div class="left-controls">
+            <div class="pill-cluster">
+              <button type="button" class="icon-btn" id="playBtn" title="Play / Pause (Space)">⏸</button>
+              <button type="button" class="icon-btn" id="muteBtn" title="Mute (M)">🔊</button>
+              <input type="range" class="vol-range" id="volRange" min="0" max="1" step="0.05" value="1" />
+              <span class="time-text" id="timeText">0:00 / 0:00</span>
+            </div>
+          </div>
+          <div class="right-controls">
+            <div class="bar-group">
+              <button type="button" class="pill-btn" id="subBtn" data-state="idle" title="Toggle AI Subtitles (Option/Alt + C)">
+                <span class="dot"></span><span class="txt">AI CC: OFF</span>
+              </button>
+              <button type="button" class="pill-btn" id="dubBtn" data-state="idle" title="Toggle AI Voice Dubbing (Option/Alt + D)">
+                <span class="dot"></span><span class="txt">Dub: OFF</span>
+              </button>
+            </div>
+            <div class="pill-cluster" style="gap:2px;padding:0 6px">
+              <button type="button" class="icon-btn" id="speedBtn" title="Playback Speed">1x</button>
+              <button type="button" class="icon-btn" id="fsBtn" title="Fullscreen (F)">⛶</button>
+              <button type="button" class="icon-btn" id="closeBtn" title="Switch back to YouTube player" style="display:none;font-size:11.5px;padding:0 8px">✕ YouTube</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="errorBox" class="error-box">
       <div class="error-title">Could not stream saved copy</div>
       <div id="errorSub" class="error-sub">Make sure YT Cloud Saver Desktop App is running.</div>
