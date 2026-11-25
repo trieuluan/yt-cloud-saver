@@ -32,6 +32,10 @@ pub struct Job {
     pub progress: u8,
     pub stage_text: String,
     pub file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_text: Option<String>,
     pub error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -104,7 +108,30 @@ fn extract_ytdlp_percent(line: &str) -> Option<u8> {
     Some(val.round().clamp(0.0, 99.0) as u8)
 }
 
-fn extract_rclone_percent(line: &str) -> Option<u8> {
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut val = bytes as f64;
+    let mut idx = 0usize;
+    while val >= 1024.0 && idx < UNITS.len() - 1 {
+        val /= 1024.0;
+        idx += 1;
+    }
+    if idx == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{val:.2} {}", UNITS[idx])
+    }
+}
+
+fn extract_rclone_progress(line: &str) -> Option<(u8, Option<String>, Option<String>)> {
+    let has_bytes_unit = line.contains("Bytes")
+        || line.contains("KiB")
+        || line.contains("MiB")
+        || line.contains("GiB")
+        || line.contains("TiB");
+    if !has_bytes_unit || !line.contains('/') || !line.contains('%') {
+        return None;
+    }
     let pct_idx = line.find('%')?;
     let prefix = line[..pct_idx].trim();
     let num_str = prefix
@@ -114,7 +141,34 @@ fn extract_rclone_percent(line: &str) -> Option<u8> {
         return None;
     }
     let val: u8 = num_str.parse().ok()?;
-    Some(val.min(99))
+    let pct = val.min(99);
+
+    // Parse "... : 1.42 GiB / 2.12 GiB, 67%, 18.5 MiB/s, ETA 38s"
+    let clean = line
+        .split("Transferred:")
+        .last()
+        .unwrap_or(line)
+        .split("INFO")
+        .last()
+        .unwrap_or(line);
+    let clean = clean.split(':').last().unwrap_or(clean).trim();
+    let parts: Vec<&str> = clean.split(',').map(|s| s.trim()).collect();
+    let size_part = parts
+        .first()
+        .filter(|s| s.contains('/'))
+        .map(|s| (*s).to_string());
+    let mut speed_bits: Vec<&str> = Vec::new();
+    for p in parts.iter().skip(2) {
+        if p.contains("/s") || p.starts_with("ETA") {
+            speed_bits.push(*p);
+        }
+    }
+    let speed_part = if speed_bits.is_empty() {
+        None
+    } else {
+        Some(speed_bits.join(" · "))
+    };
+    Some((pct, size_part, speed_part))
 }
 
 struct InnerState {
@@ -348,6 +402,8 @@ impl JobManager {
             progress: 0,
             stage_text: "Queued".to_string(),
             file_name: None,
+            size_text: None,
+            speed_text: None,
             error: None,
             created_at: now.clone(),
             updated_at: now,
@@ -393,6 +449,8 @@ impl JobManager {
             progress: 5,
             stage_text: "Starting translation...".to_string(),
             file_name: None,
+            size_text: None,
+            speed_text: None,
             error: None,
             created_at: now.clone(),
             updated_at: now,
@@ -544,6 +602,16 @@ impl JobManager {
             if let Some(e) = error {
                 job.error = Some(e);
             }
+            job.updated_at = Utc::now().to_rfc3339();
+            self.persist_locked(&state.jobs);
+        }
+    }
+
+    async fn update_job_stats(&self, id: &str, size_text: Option<String>, speed_text: Option<String>) {
+        let mut state = self.inner.lock().await;
+        if let Some(job) = state.jobs.iter_mut().find(|j| j.id == id) {
+            job.size_text = size_text;
+            job.speed_text = speed_text;
             job.updated_at = Utc::now().to_rfc3339();
             self.persist_locked(&state.jobs);
         }
@@ -841,6 +909,15 @@ impl JobManager {
     async fn upload_to_cloud(&self, job: &Job, file_path: &Path) -> Result<(), String> {
         let rclone = find_binary("rclone", &self.bin_dir)
             .ok_or_else(|| "rclone is not installed".to_string())?;
+        let total_bytes = fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+        if total_bytes > 0 {
+            self.update_job_stats(
+                &job.id,
+                Some(format!("0 B / {}", format_bytes(total_bytes))),
+                None,
+            )
+            .await;
+        }
 
         let mut child = Command::new(rclone)
             .args([
@@ -868,7 +945,7 @@ impl JobManager {
                     let start = stderr_tail.len() - 1500;
                     stderr_tail = stderr_tail[start..].to_string();
                 }
-                if let Some(pct) = extract_rclone_percent(&line) {
+                if let Some((pct, size_part, speed_part)) = extract_rclone_progress(&line) {
                     self.update_job(
                         &job.id,
                         None,
@@ -878,6 +955,9 @@ impl JobManager {
                         None,
                     )
                     .await;
+                    if size_part.is_some() || speed_part.is_some() {
+                        self.update_job_stats(&job.id, size_part, speed_part).await;
+                    }
                 }
             }
         }
@@ -893,6 +973,10 @@ impl JobManager {
             } else {
                 stderr_tail.trim().to_string()
             });
+        }
+        if total_bytes > 0 {
+            self.update_job_stats(&job.id, Some(format_bytes(total_bytes)), None)
+                .await;
         }
         Ok(())
     }

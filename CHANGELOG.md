@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.2] - 2026-11-26
+
+### Fixed & Improved
+- **Accurate Upload Progress & Live Size/Speed/ETA:** Fixed `rclone` progress parser jumping between `99%` and `50%` on non-transfer lines, and added a dedicated stats row below the progress bar showing transferred size (`1.42 GiB / 2.12 GiB`), upload speed, and `ETA` in both the Desktop App and Extension Popup.
+
 ## [1.2.1] - 2026-11-26
 
 ### Added

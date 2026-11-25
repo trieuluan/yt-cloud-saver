@@ -573,3 +573,19 @@ select {
   color: #f1f5f9;
   text-decoration: underline;
 }
+
+.job-stats {
+  margin-top: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: #9aa3b2;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-stats .size-val {
+  color: #93c5fd;
+  font-weight: 600;
+}

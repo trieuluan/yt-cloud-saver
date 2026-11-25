@@ -755,3 +755,19 @@ select:focus {
 .hidden {
   display: none !important;
 }
+
+.job-stats {
+  margin-top: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #9aa3b2;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-stats .size-val {
+  color: #93c5fd;
+  font-weight: 600;
+}

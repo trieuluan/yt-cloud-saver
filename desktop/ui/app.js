@@ -271,6 +271,11 @@ function renderJobs(jobs = [], translations = []) {
           <div class="job-meta">${escapeHtml(job.stageText || job.status)} · ${escapeHtml(job.remote || '')}</div>
           ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ''}
           <div class="bar"><div class="bar-fill ${barCls}" style="width:${pct}%"></div></div>
+          ${
+            job.sizeText || job.speedText
+              ? `<div class="job-stats"><span class="size-val">${escapeHtml(job.sizeText || '')}</span><span>${escapeHtml(job.speedText || '')}</span></div>`
+              : ''
+          }
         </div>
       `;
     })
