@@ -72,6 +72,9 @@ const aiSettingsMsg = document.getElementById('aiSettingsMsg');
 const guideBtn = document.getElementById('guideBtn');
 const guideModal = document.getElementById('guideModal');
 const closeGuideBtn = document.getElementById('closeGuideBtn');
+const supportBtn = document.getElementById('supportBtn');
+const supportModal = document.getElementById('supportModal');
+const closeSupportBtn = document.getElementById('closeSupportBtn');
 const openExtFolderBtn = document.getElementById('openExtFolderBtn');
 const openChromeExtBtn = document.getElementById('openChromeExtBtn');
 const guideError = document.getElementById('guideError');
@@ -760,6 +763,12 @@ guideBtn.addEventListener('click', () => guideModal.classList.remove('hidden'));
 closeGuideBtn.addEventListener('click', () => guideModal.classList.add('hidden'));
 guideModal.addEventListener('click', (e) => {
   if (e.target === guideModal) guideModal.classList.add('hidden');
+});
+
+supportBtn.addEventListener('click', () => supportModal.classList.remove('hidden'));
+closeSupportBtn.addEventListener('click', () => supportModal.classList.add('hidden'));
+supportModal.addEventListener('click', (e) => {
+  if (e.target === supportModal) supportModal.classList.add('hidden');
 });
 
 loadState();

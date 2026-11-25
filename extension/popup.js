@@ -40,6 +40,9 @@ const serverUrlInput = document.getElementById('serverUrlInput');
 const settingsMsg = document.getElementById('settingsMsg');
 const jobsList = document.getElementById('jobsList');
 const refreshBtn = document.getElementById('refreshBtn');
+const popSupportBtn = document.getElementById('popSupportBtn');
+const popSupportModal = document.getElementById('popSupportModal');
+const closePopSupportBtn = document.getElementById('closePopSupportBtn');
 
 const ACTIVE_STATUSES = new Set(['queued', 'downloading', 'uploading']);
 const DEFAULT_SUB_STYLE = {
@@ -406,6 +409,11 @@ jobsList.addEventListener('click', async (e) => {
 });
 
 refreshBtn.addEventListener('click', loadState);
+popSupportBtn.addEventListener('click', () => popSupportModal.classList.remove('hidden'));
+closePopSupportBtn.addEventListener('click', () => popSupportModal.classList.add('hidden'));
+popSupportModal.addEventListener('click', (e) => {
+  if (e.target === popSupportModal) popSupportModal.classList.add('hidden');
+});
 openAppBtn.addEventListener('click', async () => {
   try {
     await sendBg('SHOW_APP');

@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.1] - 2026-11-26
+
+### Added
+- **In-App Support & Donation Modal:** Added a lightweight `☕ Support` button in both the Desktop App footer and Extension Popup with a direct Ko-fi link and scannable MoMo / VietQR code.
+
 ## [1.2.0] - 2026-11-26
 
 ### Added

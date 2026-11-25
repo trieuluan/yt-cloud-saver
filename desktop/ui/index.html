@@ -249,8 +249,38 @@
 
       <footer class="footer">
         <span>Close window to keep running in Menu Bar</span>
-        <button id="guideBtn" class="link-btn" type="button">Extension Guide</button>
+        <div class="btn-group">
+          <button id="supportBtn" class="link-btn" type="button">☕ Support</button>
+          <button id="guideBtn" class="link-btn" type="button">Extension Guide</button>
+        </div>
       </footer>
+    </div>
+
+    <!-- SUPPORT MODAL -->
+    <div id="supportModal" class="modal hidden">
+      <div class="modal-card" style="text-align:center">
+        <div class="modal-header">
+          <strong>☕ Support YT Cloud Saver</strong>
+          <button id="closeSupportBtn" class="btn-ghost" type="button">Close</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">
+          Free &amp; open source. Buy me a coffee if this tool helps you!
+        </p>
+        <a
+          href="https://ko-fi.com/luantruong19136"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn-primary"
+          style="display:inline-block;text-decoration:none;margin-bottom:12px"
+        >☕ Support on Ko-fi</a>
+        <div class="muted" style="margin-bottom:8px">From Vietnam: scan with MoMo / VietQR</div>
+        <img
+          src="momo-qr.png"
+          alt="MoMo / VietQR donation code"
+          width="180"
+          style="border-radius:10px;display:block;margin:0 auto"
+        />
+      </div>
     </div>
 
     <!-- EXTENSION GUIDE MODAL -->
