@@ -41,6 +41,10 @@
         subMode = subStyle.defaultMode;
         updateSubButtons();
       }
+      if (dubEnabled && savedVolume !== null) {
+        const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+        if (video) video.volume = Math.min(savedVolume, Number(subStyle.dubVolume ?? 0.15));
+      }
     }
   });
 
@@ -868,8 +872,38 @@
         if (mySeq === speakSeq) restoreVideoVolume(video);
       };
       dubAudioEl.src = audioUrl;
-      const desiredRate = computeDubRate(text, cue, video);
-      dubAudioEl.playbackRate = Math.min(2.5, Math.max(0.85, desiredRate / 1.15));
+      await new Promise((resolve) => {
+        if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
+          resolve();
+          return;
+        }
+        const onMeta = () => {
+          dubAudioEl.removeEventListener('loadedmetadata', onMeta);
+          dubAudioEl.removeEventListener('error', onMeta);
+          resolve();
+        };
+        dubAudioEl.addEventListener('loadedmetadata', onMeta, { once: true });
+        dubAudioEl.addEventListener('error', onMeta, { once: true });
+        setTimeout(onMeta, 120);
+      });
+      if (mySeq !== speakSeq || !dubEnabled || video.paused) {
+        if (!dubAudioEl || dubAudioEl.paused) restoreVideoVolume(video);
+        return;
+      }
+
+      const ytRate = Math.max(0.5, Number(video.playbackRate) || 1);
+      const userSpeed = Math.max(0.7, Math.min(2.0, Number(subStyle.dubSpeed) || 1.0));
+      const baseAudioRate = (userSpeed * ytRate) / 1.15;
+      let exactAudioRate = baseAudioRate;
+      if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
+        const remCueMs = Math.max(300, (cue.endMs || 0) - video.currentTime * 1000);
+        const availSec = remCueMs / 1000 / ytRate;
+        const fitAudioRate = dubAudioEl.duration / Math.max(0.25, availSec * 0.96);
+        exactAudioRate = Math.max(baseAudioRate, fitAudioRate);
+      } else {
+        exactAudioRate = computeDubRate(text, cue, video) / 1.15;
+      }
+      dubAudioEl.playbackRate = Math.min(2.5, Math.max(0.7, exactAudioRate));
       duckVideoVolume(video);
       await dubAudioEl.play();
     } catch {

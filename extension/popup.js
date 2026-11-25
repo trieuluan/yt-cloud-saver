@@ -19,7 +19,8 @@ const opacitySlider = document.getElementById('opacitySlider');
 const opacityLabel = document.getElementById('opacityLabel');
 const prevOrig = document.getElementById('prevOrig');
 const prevTr = document.getElementById('prevTr');
-const dubVolSelect = document.getElementById('dubVolSelect');
+const dubVolSlider = document.getElementById('dubVolSlider');
+const dubVolLabel = document.getElementById('dubVolLabel');
 
 const remoteInput = document.getElementById('remoteInput');
 const dubVoiceSelect = document.getElementById('dubVoiceSelect');
@@ -104,8 +105,10 @@ function renderSubStyle() {
   opacitySlider.value = subStyle.bgOpacity;
   opacityLabel.textContent = `${subStyle.bgOpacity}%`;
   dubVoiceSelect.value = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-  dubSpeedSelect.value = String(subStyle.dubSpeed ?? 1.0);
-  dubVolSelect.value = String(subStyle.dubVolume);
+  dubSpeedSelect.value = String(Number(subStyle.dubSpeed ?? 1));
+  const volPct = Math.round(Number(subStyle.dubVolume ?? 0.15) * 100);
+  dubVolSlider.value = String(volPct);
+  dubVolLabel.textContent = `${volPct}%`;
 
   const a = subStyle.bgOpacity / 100;
   prevTr.style.fontSize = `${subStyle.fontSize}px`;
@@ -352,8 +355,8 @@ dubSpeedSelect.addEventListener('change', () => {
   subStyle.dubSpeed = Number(dubSpeedSelect.value);
   saveSubStyle();
 });
-dubVolSelect.addEventListener('change', () => {
-  subStyle.dubVolume = Number(dubVolSelect.value);
+dubVolSlider.addEventListener('input', () => {
+  subStyle.dubVolume = Number(dubVolSlider.value) / 100;
   saveSubStyle();
 });
 

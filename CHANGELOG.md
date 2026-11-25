@@ -2,6 +2,13 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.4] - 2026-11-26
+
+### Improved & Fixed
+- **Exact Audio-Duration Dub Alignment:** Measures actual synthesized Edge TTS MP3 `duration` via `loadedmetadata` and scales `playbackRate` so each dubbed line finishes right on cue (`endMs`) without spilling into the next subtitle.
+- **Original Volume Slider during Dub:** Replaced the fixed 3-option dropdown with a live `0%–100%` slider (`5%` steps) synced in real time to both YouTube and Cloud Player.
+- **Dubbing Speed `1.0x` Display Fix:** Fixed `Dubbing Speed` `<select>` appearing blank when set to `1.0x` (`"1"` vs `"1.0"`).
+
 ## [1.2.3] - 2026-11-26
 
 ### Fixed

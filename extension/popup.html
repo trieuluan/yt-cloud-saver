@@ -104,21 +104,18 @@
           <span class="label-sm">Dubbing Speed</span>
           <select id="dubSpeedSelect" class="select-compact">
             <option value="0.9">0.9x (Slow)</option>
-            <option value="1.0">1.0x (Natural)</option>
+            <option value="1">1.0x (Natural)</option>
             <option value="1.1">1.1x (Slightly Fast)</option>
             <option value="1.2">1.2x (Fast)</option>
             <option value="1.35">1.35x</option>
             <option value="1.5">1.5x</option>
           </select>
         </div>
-        <div class="between">
+        <div class="between" style="margin-bottom:6px">
           <span class="label-sm">Original volume during Dub</span>
-          <select id="dubVolSelect" class="select-compact">
-            <option value="0.15">15% (Recommended)</option>
-            <option value="0">0% (Mute)</option>
-            <option value="0.3">30%</option>
-          </select>
+          <span id="dubVolLabel" class="val-blue">15%</span>
         </div>
+        <input id="dubVolSlider" class="clean-range" type="range" min="0" max="100" step="5" value="15" />
       </div>
     </section>
 
@@ -184,7 +181,7 @@
     </section>
 
     <footer class="popup-footer">
-      <span class="footer-ver">YT Cloud Saver · v1.2.3</span>
+      <span class="footer-ver">YT Cloud Saver · v1.2.4</span>
       <button id="popSupportBtn" class="footer-link" type="button">☕ Support</button>
     </footer>
 

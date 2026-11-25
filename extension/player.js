@@ -72,6 +72,9 @@
         subMode = subStyle.defaultMode;
         updateButtons();
       }
+      if (dubEnabled && savedVolume !== null) {
+        videoEl.volume = Math.min(savedVolume, Number(subStyle.dubVolume ?? 0.15));
+      }
     }
   });
 
@@ -286,8 +289,38 @@
         if (mySeq === speakSeq) restoreVideoVolume();
       };
       dubAudioEl.src = audioUrl;
-      const desiredRate = computeDubRate(text, cue);
-      dubAudioEl.playbackRate = Math.min(2.5, Math.max(0.7, desiredRate / 1.15));
+      await new Promise((resolve) => {
+        if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
+          resolve();
+          return;
+        }
+        const onMeta = () => {
+          dubAudioEl.removeEventListener('loadedmetadata', onMeta);
+          dubAudioEl.removeEventListener('error', onMeta);
+          resolve();
+        };
+        dubAudioEl.addEventListener('loadedmetadata', onMeta, { once: true });
+        dubAudioEl.addEventListener('error', onMeta, { once: true });
+        setTimeout(onMeta, 120);
+      });
+      if (mySeq !== speakSeq || !dubEnabled || videoEl.paused) {
+        if (!dubAudioEl || dubAudioEl.paused) restoreVideoVolume();
+        return;
+      }
+
+      const vidRate = Math.max(0.5, Number(videoEl.playbackRate) || 1);
+      const userSpeed = Math.max(0.7, Math.min(2.0, Number(subStyle.dubSpeed) || 1.0));
+      const baseAudioRate = (userSpeed * vidRate) / 1.15;
+      let exactAudioRate = baseAudioRate;
+      if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
+        const remCueMs = Math.max(300, (cue.endMs || 0) - videoEl.currentTime * 1000);
+        const availSec = remCueMs / 1000 / vidRate;
+        const fitAudioRate = dubAudioEl.duration / Math.max(0.25, availSec * 0.96);
+        exactAudioRate = Math.max(baseAudioRate, fitAudioRate);
+      } else {
+        exactAudioRate = computeDubRate(text, cue) / 1.15;
+      }
+      dubAudioEl.playbackRate = Math.min(2.5, Math.max(0.7, exactAudioRate));
       duckVideoVolume();
       await dubAudioEl.play();
     } catch {
