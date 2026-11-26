@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.18] - 2026-11-26
+
+### Improved
+- **Silero VAD (`--vad`) for Local Whisper:** Automatically downloads `ggml-silero-v5.1.2.bin` (~864 KB) during `whisper-cli` installation (and on demand for existing installs) and passes `--vad -vm` to `whisper-cli`, preventing subtitles from starting early across silent pauses.
+
 ## [1.2.17] - 2026-11-26
 
 ### Fixed

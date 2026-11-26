@@ -100,6 +100,7 @@ async fn list_ai_models_cmd(state: State<'_, AppState>) -> Result<Vec<String>, S
 #[tauri::command]
 async fn install_whisper_cli_cmd(state: State<'_, AppState>) -> Result<WhisperStatus, String> {
     install_whisper_cli(&state.bin_dir).await?;
+    let _ = tools::ensure_whisper_vad_model(&state.data_dir).await;
     Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
 }
 

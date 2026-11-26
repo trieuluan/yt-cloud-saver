@@ -462,6 +462,25 @@ pub fn whisper_model_path(data_dir: &Path, model_name: &str) -> PathBuf {
     whisper_models_dir(data_dir).join(format!("ggml-{model_name}.bin"))
 }
 
+pub fn whisper_vad_model_path(data_dir: &Path) -> PathBuf {
+    whisper_models_dir(data_dir).join("ggml-silero-v5.1.2.bin")
+}
+
+pub async fn ensure_whisper_vad_model(data_dir: &Path) -> Result<PathBuf, String> {
+    let dest = whisper_vad_model_path(data_dir);
+    if dest.is_file() && std::fs::metadata(&dest).map(|m| m.len() > 100_000).unwrap_or(false) {
+        return Ok(dest);
+    }
+    let models_dir = whisper_models_dir(data_dir);
+    std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    download_to_file(
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+        &dest,
+    )
+    .await?;
+    Ok(dest)
+}
+
 pub fn check_whisper_status(data_dir: &Path, bin_dir: &Path) -> WhisperStatus {
     let cli_installed =
         find_binary("whisper-cli", bin_dir).is_some() || find_binary("whisper", bin_dir).is_some();

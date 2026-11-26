@@ -998,6 +998,11 @@ where
     } else {
         config.whisper_language.trim()
     };
+    let vad_model = if !is_cloud {
+        crate::tools::ensure_whisper_vad_model(data_dir).await.ok()
+    } else {
+        None
+    };
 
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
         let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
@@ -1014,24 +1019,32 @@ where
         } else {
             let whisper_bin = whisper.as_ref().ok_or("whisper-cli missing")?;
             let srt_prefix = tmp_dir.join(format!("whisper_out_{chunk_idx:03}"));
+            let mut wh_args = vec![
+                "-m".to_string(),
+                model_path.to_string_lossy().to_string(),
+                "-l".to_string(),
+                whisper_lang.to_string(),
+                "-mc".to_string(),
+                "0".to_string(),
+                "-et".to_string(),
+                "2.4".to_string(),
+                "-bs".to_string(),
+                "1".to_string(),
+            ];
+            if let Some(ref vad_path) = vad_model {
+                wh_args.push("--vad".to_string());
+                wh_args.push("-vm".to_string());
+                wh_args.push(vad_path.to_string_lossy().to_string());
+            }
+            wh_args.extend([
+                "-f".to_string(),
+                chunk_wav.to_string_lossy().to_string(),
+                "-osrt".to_string(),
+                "-of".to_string(),
+                srt_prefix.to_string_lossy().to_string(),
+            ]);
             let wh_out = Command::new(whisper_bin)
-                .args([
-                    "-m",
-                    &model_path.to_string_lossy(),
-                    "-l",
-                    whisper_lang,
-                    "-mc",
-                    "0",
-                    "-et",
-                    "2.4",
-                    "-bs",
-                    "1",
-                    "-f",
-                    &chunk_wav.to_string_lossy(),
-                    "-osrt",
-                    "-of",
-                    &srt_prefix.to_string_lossy(),
-                ])
+                .args(&wh_args)
                 .env("PATH", build_env_path(bin_dir))
                 .output()
                 .await
