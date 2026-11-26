@@ -3,14 +3,12 @@ use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
-use tokio::net::TcpStream;
-use tokio::sync::{Mutex, Semaphore};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::sync::Semaphore;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
@@ -317,18 +315,11 @@ fn cache_key(voice: &str, rate: &str, text: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-struct EdgeTtsConn {
-    ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    created_at: Instant,
-}
-
-static EDGE_WS_POOL: OnceLock<Mutex<Vec<EdgeTtsConn>>> = OnceLock::new();
-
-fn ws_pool() -> &'static Mutex<Vec<EdgeTtsConn>> {
-    EDGE_WS_POOL.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-async fn open_edge_tts_conn() -> Result<EdgeTtsConn, String> {
+async fn synthesize_edge_tts_once(
+    clean_text: &str,
+    voice_name: &str,
+    rate_str: &str,
+) -> Result<Vec<u8>, String> {
     let conn_id = Uuid::new_v4().simple().to_string();
     let sec_ms_gec = generate_sec_ms_gec_v2();
     let ws_url = format!(
@@ -370,19 +361,6 @@ async fn open_edge_tts_conn() -> Result<EdgeTtsConn, String> {
         .await
         .map_err(|e| format!("Edge TTS config send failed: {e}"))?;
 
-    Ok(EdgeTtsConn {
-        ws,
-        created_at: Instant::now(),
-    })
-}
-
-async fn send_ssml_on_conn(
-    conn: &mut EdgeTtsConn,
-    clean_text: &str,
-    voice_name: &str,
-    rate_str: &str,
-) -> Result<Vec<u8>, String> {
-    let ts = js_timestamp();
     let req_id = Uuid::new_v4().simple().to_string();
     let escaped = escape_xml(clean_text);
     let ssml = format!(
@@ -391,13 +369,12 @@ async fn send_ssml_on_conn(
     let ssml_msg = format!(
         "X-RequestId:{req_id}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:{ts}\r\nPath:ssml\r\n\r\n{ssml}"
     );
-    conn.ws
-        .send(Message::Text(ssml_msg.into()))
+    ws.send(Message::Text(ssml_msg.into()))
         .await
         .map_err(|e| format!("Edge TTS SSML send failed: {e}"))?;
 
     let mut audio_bytes: Vec<u8> = Vec::new();
-    while let Some(frame) = conn.ws.next().await {
+    while let Some(frame) = ws.next().await {
         match frame {
             Ok(Message::Binary(data)) => {
                 if data.len() >= 2 {
@@ -413,11 +390,12 @@ async fn send_ssml_on_conn(
                     break;
                 }
             }
-            Ok(Message::Close(_)) => return Err("Edge TTS closed connection".to_string()),
+            Ok(Message::Close(_)) => break,
             Err(e) => return Err(format!("Edge TTS stream error: {e}")),
             _ => {}
         }
     }
+    let _ = ws.close(None).await;
 
     if audio_bytes.is_empty() {
         return Err("Edge TTS returned empty audio".to_string());
@@ -449,51 +427,22 @@ pub async fn synthesize_edge_tts(
 
     let mut last_err = String::new();
     for attempt in 0..2 {
-        let pooled = {
-            let mut pool = ws_pool().lock().await;
-            let mut found = None;
-            while let Some(c) = pool.pop() {
-                if c.created_at.elapsed() < Duration::from_secs(240) {
-                    found = Some(c);
-                    break;
-                }
+        match tokio::time::timeout(
+            Duration::from_secs(6),
+            synthesize_edge_tts_once(clean_text, &voice_name, &rate_str),
+        )
+        .await
+        {
+            Ok(Ok(audio_bytes)) => {
+                let _ = fs::create_dir_all(&cache_dir);
+                let _ = fs::write(&cache_path, &audio_bytes);
+                return Ok(audio_bytes);
             }
-            found
-        };
-
-        let conn_res = match pooled {
-            Some(c) => Ok(c),
-            None => match tokio::time::timeout(Duration::from_secs(6), open_edge_tts_conn()).await {
-                Ok(r) => r,
-                Err(_) => Err("Edge TTS connect timed out".to_string()),
-            },
-        };
-
-        match conn_res {
-            Ok(mut conn) => {
-                match tokio::time::timeout(
-                    Duration::from_secs(6),
-                    send_ssml_on_conn(&mut conn, clean_text, &voice_name, &rate_str),
-                )
-                .await
-                {
-                    Ok(Ok(audio_bytes)) => {
-                        let mut pool = ws_pool().lock().await;
-                        if pool.len() < 2 {
-                            pool.push(conn);
-                        }
-                        let _ = fs::create_dir_all(&cache_dir);
-                        let _ = fs::write(&cache_path, &audio_bytes);
-                        return Ok(audio_bytes);
-                    }
-                    Ok(Err(e)) => last_err = e,
-                    Err(_) => last_err = "Edge TTS request timed out".to_string(),
-                }
-            }
-            Err(e) => last_err = e,
+            Ok(Err(e)) => last_err = e,
+            Err(_) => last_err = "Edge TTS request timed out".to_string(),
         }
         if attempt == 0 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(120)).await;
         }
     }
     Err(last_err)

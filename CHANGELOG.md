@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.25] - 2026-11-26
+
+### Fixed
+- **Edge TTS `unexpected-eof` Fix & RAM Pre-warm:** Removed stale WebSocket pooling in `tts.rs` (Microsoft closes Edge TTS sockets after 1 turn, causing `unexpected-eof` 502s on reuse) so every synthesis uses a clean ~1s WebSocket with auto-retry. Also pauses playback briefly during `Dub: Buffering...` to pre-cache 16 cues on disk and preload the first 6 cues into browser RAM for 0ms start.
+
 ## [1.2.24] - 2026-11-26
 
 ### Improved

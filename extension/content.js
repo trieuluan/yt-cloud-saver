@@ -1119,14 +1119,30 @@
       try {
         await ensureTranslatedBundle();
         const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+        const wasPlaying = Boolean(video && !video.paused);
         const nowMs = (video?.currentTime || 0) * 1000;
         const curIdx = Math.max(0, subBundle?.cues?.findIndex((c) => c.endMs >= nowMs) ?? 0);
+        preparedFromIdx = -1;
         preparedUpToIdx = -1;
-        if ((subStyle.dubVoice || 'vi-VN-HoaiMyNeural') !== 'browser' && dubBtnEl) {
+        const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+        if (voice !== 'browser' && dubBtnEl) {
+          if (wasPlaying) video.pause();
           dubBtnEl.dataset.state = 'working';
           const txt = dubBtnEl.querySelector('.txt');
           if (txt) txt.textContent = 'Dub: Buffering...';
-          await prepareBatchAhead(curIdx, 10);
+          await prepareBatchAhead(curIdx, 16);
+          // Pre-warm first 6 cues directly into browser RAM cache for instant 0ms playback
+          const preloadTasks = [];
+          for (let i = curIdx; i < Math.min(subBundle?.cues?.length || 0, curIdx + 6); i += 1) {
+            const t = subBundle.cues[i]?.translated?.trim();
+            if (hasSpeakableText(t)) {
+              preloadTasks.push(fetchEdgeTtsAudio(t, voice, '+15%').catch(() => {}));
+            }
+          }
+          if (preloadTasks.length) await Promise.all(preloadTasks);
+          if (wasPlaying && video.paused) {
+            video.play().catch(() => {});
+          }
         }
         dubEnabled = true;
         if (subMode === 'off') subMode = 'translated';
