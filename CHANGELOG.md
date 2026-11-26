@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.22] - 2026-11-26
+
+### Fixed
+- **OpenAI-Compatible `stream: false`:** Explicitly sends `"stream": false` in OpenAI-compatible `/chat/completions` requests (including `Test` connection), fixing `error decoding response body` when routing through HiveRouter / 9Router or proxies that default to SSE streaming.
+
 ## [1.2.21] - 2026-11-26
 
 ### Improved

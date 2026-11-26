@@ -1,6 +1,6 @@
 [package]
 name = "yt-cloud-saver-desktop"
-version = "1.2.21"
+version = "1.2.22"
 description = "YT Cloud Saver Desktop Companion App"
 authors = ["Louis"]
 edition = "2021"

@@ -1243,6 +1243,7 @@ async fn call_llm_once(config: &AppConfig, prompt: &str) -> Result<String, Strin
 
     let mut req = client.post(&endpoint).json(&json!({
         "model": model,
+        "stream": false,
         "messages": [
             { "role": "system", "content": "You are an expert movie subtitle translator. Follow output format instructions strictly." },
             { "role": "user", "content": prompt }
