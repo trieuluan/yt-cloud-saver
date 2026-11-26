@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.38] - 2026-11-27
+
+### Fixed
+- **Extension Manifest:** Fixed JSON syntax typo in `extension/manifest.json`.
+
 ## [1.2.37] - 2026-11-27
 
 ### Fixed
