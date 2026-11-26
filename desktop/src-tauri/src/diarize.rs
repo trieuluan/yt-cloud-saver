@@ -445,12 +445,36 @@ mod tests {
         let f0 = estimate_median_f0_hz(&pcm).expect("f0");
         assert!((f0 - 220.0).abs() < 15.0, "expected ~220Hz, got {f0}");
 
-        let model_path = Path::new("/Users/louis/Library/Application Support/com.louis.yt-cloud-saver/models/wespeaker_voxceleb.onnx");
-        if model_path.is_file() {
+        let candidate_path = std::env::var_os("YTCS_WESPEAKER_MODEL")
+            .map(PathBuf::from)
+            .or_else(|| {
+                #[cfg(target_os = "macos")]
+                {
+                    std::env::var_os("HOME").map(|h| {
+                        PathBuf::from(h)
+                            .join("Library/Application Support/com.louis.yt-cloud-saver/models/wespeaker_voxceleb.onnx")
+                    })
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    std::env::var_os("APPDATA").map(|a| {
+                        PathBuf::from(a)
+                            .join("com.louis.yt-cloud-saver/models/wespeaker_voxceleb.onnx")
+                    })
+                }
+                #[cfg(all(unix, not(target_os = "macos")))]
+                {
+                    std::env::var_os("XDG_DATA_HOME")
+                        .map(PathBuf::from)
+                        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+                        .map(|d| d.join("com.louis.yt-cloud-saver/models/wespeaker_voxceleb.onnx"))
+                }
+            });
+        if let Some(model_path) = candidate_path.filter(|p| p.is_file()) {
             let env = ort::init().with_name("ytcs_ws_test").build().expect("env");
             let mut session = Session::builder(&env)
                 .expect("builder")
-                .commit_from_file(model_path)
+                .commit_from_file(&model_path)
                 .expect("load wespeaker");
             let tensor = Tensor::from_array(([1usize, frames, 80usize], fbank.into_boxed_slice())).expect("tensor");
             let outputs = session.run(ort::inputs![tensor]).expect("run wespeaker");
