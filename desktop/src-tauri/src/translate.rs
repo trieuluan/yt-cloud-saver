@@ -15,6 +15,8 @@ pub struct SubtitleCue {
     pub end_ms: u64,
     pub original: String,
     pub translated: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +271,7 @@ async fn transcribe_chunk_cloud(
                     end_ms,
                     original: text,
                     translated: String::new(),
+                    speaker: None,
                 });
             }
             if cues.is_empty() && !parsed.text.trim().is_empty() {
@@ -277,6 +280,7 @@ async fn transcribe_chunk_cloud(
                     end_ms: offset_ms + 10_000,
                     original: parsed.text.trim().to_string(),
                     translated: String::new(),
+                    speaker: None,
                 });
             }
             return Ok(cues);
@@ -487,8 +491,21 @@ async fn translate_indexed_subset(
     } else {
         "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
     };
+fn strip_speaker_hint_prefix(s: &str) -> String {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let tag = &rest[..end];
+            if tag.starts_with("Nam") || tag.starts_with("Nữ") || tag.starts_with("Speaker") {
+                return rest[end + 1..].trim().to_string();
+            }
+        }
+    }
+    t.to_string()
+}
+
     let prompt = format!(
-        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation). Prefer concise phrasing that fits natural dubbing cadence when possible without losing meaning or emotional nuance. Add natural punctuation ('?' for questions, '!' for exclamations/commands/calls, ',' for pauses) so TTS intonation sounds expressive, but do NOT force a trailing '.' on short incomplete fragments.\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
+        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation). Prefer concise phrasing that fits natural dubbing cadence when possible without losing meaning or emotional nuance. Add natural punctuation ('?' for questions, '!' for exclamations/commands/calls, ',' for pauses) so TTS intonation sounds expressive, but do NOT force a trailing '.' on short incomplete fragments.\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu). If a line starts with an audio speaker hint like \"[Nữ · A]\" or \"[Nam · B]\", use it to infer speaker gender and pronouns (prefer story context if they conflict), and NEVER include the \"[...]\" tag in your translated output.\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
@@ -513,7 +530,7 @@ async fn translate_indexed_subset(
                         .lines
                         .into_iter()
                         .filter_map(|it| {
-                            let t = it.t.trim().to_string();
+                            let t = strip_speaker_hint_prefix(&it.t);
                             if t.is_empty() { None } else { Some((it.i, t)) }
                         })
                         .collect());
@@ -554,13 +571,19 @@ async fn translate_batch_exact(
     prev_context: &str,
     title: Option<&str>,
     memory: &mut TranslationMemory,
+    speaker_hints: Option<&[String]>,
 ) -> Result<(), String> {
     let items: Vec<IndexedSubtitleLine> = batch
         .iter()
         .enumerate()
-        .map(|(i, c)| IndexedSubtitleLine {
-            i,
-            t: c.original.clone(),
+        .map(|(i, c)| {
+            let hint = speaker_hints.and_then(|h| h.get(i)).map(|s| s.as_str()).unwrap_or("");
+            let text = if hint.is_empty() {
+                c.original.clone()
+            } else {
+                format!("{hint} {}", c.original)
+            };
+            IndexedSubtitleLine { i, t: text }
         })
         .collect();
 
@@ -610,11 +633,17 @@ async fn translate_cue_batches(
     data_dir: &Path,
     video_id: &str,
     latest_cfg: &AppConfig,
+    speaker_hints: Option<&[String]>,
 ) -> Result<(), String> {
     let mut memory = TranslationMemory::default();
-    for batch in cues.chunks_mut(TRANSLATE_BATCH_SIZE) {
+    for (b_idx, batch) in cues.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
         let prev_context = build_prev_context(translated_all, &memory);
-        translate_batch_exact(latest_cfg, batch, &prev_context, None, &mut memory).await?;
+        let hint_slice = speaker_hints.map(|all| {
+            let start = b_idx * TRANSLATE_BATCH_SIZE;
+            let end = (start + batch.len()).min(all.len());
+            &all[start.min(all.len())..end]
+        });
+        translate_batch_exact(latest_cfg, batch, &prev_context, None, &mut memory, hint_slice).await?;
         for cue in batch.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
@@ -727,6 +756,7 @@ fn parse_vtt_or_srt(content: &str) -> Vec<SubtitleCue> {
             end_ms: end_ms.max(start_ms + 500),
             original: text,
             translated: String::new(),
+            speaker: None,
         });
     }
     cues
@@ -1169,6 +1199,7 @@ where
             data_dir,
             video_id,
             &latest_cfg,
+            None,
         )
         .await?;
     }
@@ -1183,6 +1214,8 @@ where
     } else {
         None
     };
+
+    let mut speaker_tracker = crate::diarize::SpeakerTracker::new();
 
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
         let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
@@ -1289,9 +1322,28 @@ where
             completed_chunks,
             total_chunks,
         );
-        let _ = fs::remove_file(chunk_wav);
 
         let latest_cfg = load_config(data_dir);
+        let speaker_hints = if latest_cfg.use_speaker_diarization
+            && crate::diarize::ensure_wespeaker_model(data_dir).await.is_ok()
+        {
+            if let Ok(pairs) = speaker_tracker.diarize_chunk(data_dir, chunk_wav, offset_ms, &chunk_cues) {
+                let mut hints = Vec::with_capacity(pairs.len());
+                for (i, (hint, code)) in pairs.into_iter().enumerate() {
+                    if i < chunk_cues.len() {
+                        chunk_cues[i].speaker = code;
+                    }
+                    hints.push(hint);
+                }
+                Some(hints)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let _ = fs::remove_file(chunk_wav);
+
         let tr_pct = 20 + ((((chunk_idx * 75) + 40) / total_chunks.max(1)) as u8).min(78);
         on_progress(
             tr_pct,
@@ -1303,6 +1355,7 @@ where
             data_dir,
             video_id,
             &latest_cfg,
+            speaker_hints.as_deref(),
         )
         .await?;
     }
@@ -1596,7 +1649,7 @@ where
             format!("Translating batch {}/{total_batches} ({pct}%)", b_idx + 1),
         );
         let prev_context = build_prev_context(&translated_all, &memory);
-        translate_batch_exact(&latest_cfg, chunk, &prev_context, Some(title), &mut memory).await?;
+        translate_batch_exact(&latest_cfg, chunk, &prev_context, Some(title), &mut memory, None).await?;
         for cue in chunk.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
@@ -1700,6 +1753,7 @@ pub fn prepare_retranslate_from_cache(
             end_ms: c.end_ms,
             original: c.original.clone(),
             translated: String::new(),
+            speaker: c.speaker.clone(),
         })
         .collect();
     if !raw_cues.is_empty() {

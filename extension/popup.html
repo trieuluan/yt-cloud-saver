@@ -45,7 +45,12 @@
             <button id="engBrowserBtn" type="button" class="seg3-btn">🔊 Browser</button>
           </div>
 
-          <div class="space-y-sm">
+          <label id="multiVoiceRow" class="between" style="cursor:pointer;padding:2px 0;">
+            <span class="label-sm">🎭 Auto Multi-Voice (Theo nhân vật)</span>
+            <input id="multiVoiceToggle" type="checkbox" />
+          </label>
+
+          <div id="singleVoiceBox" class="space-y-sm">
             <div class="between">
               <span class="label-sm">Dubbing Voice</span>
               <span id="dubVoiceHint" class="label-sm">Microsoft Neural</span>
@@ -55,6 +60,17 @@
                 <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
               </select>
               <button id="popupTestVoiceBtn" type="button" class="btn-xs-inline" title="Nghe thử giọng đang chọn">▶ Test</button>
+            </div>
+          </div>
+
+          <div id="multiVoiceBox" class="grid-2 hidden">
+            <div class="mini-box">
+              <span class="label-sm">Giọng Nữ (F)</span>
+              <select id="dubFemaleSelect" class="select-full" style="padding:5px 7px;"></select>
+            </div>
+            <div class="mini-box">
+              <span class="label-sm">Giọng Nam (M)</span>
+              <select id="dubMaleSelect" class="select-full" style="padding:5px 7px;"></select>
             </div>
           </div>
 
@@ -220,7 +236,7 @@
     </section>
 
     <footer class="popup-footer">
-      <span class="footer-ver">YT Cloud Saver · v1.2.33</span>
+      <span class="footer-ver">YT Cloud Saver · v1.2.34</span>
       <button id="popSupportBtn" class="footer-link" type="button">☕ Support</button>
     </footer>
 

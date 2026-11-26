@@ -307,6 +307,23 @@
           </div>
 
           <div class="sub-box-col">
+            <label class="toggle-row" style="margin:0;">
+              <div>
+                <div class="sub-title">Speaker &amp; Gender Hints (WeSpeaker)</div>
+                <div class="muted" style="font-size:11px;">Phân biệt người nói &amp; giới tính [Nam/Nữ · A/B] để dịch chuẩn xưng hô</div>
+              </div>
+              <input id="speakerDiarizeInput" type="checkbox" />
+            </label>
+            <div class="sub-box-foot">
+              <span id="wespeakerModelStatus" class="muted">Checking...</span>
+              <div class="btn-group">
+                <button id="wespeakerDlBtn" class="btn-primary btn-xs" type="button">Download</button>
+                <button id="wespeakerRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-box-col">
             <div class="quality-row">
               <span class="sub-title">Spoken Language</span>
               <select id="whisperLangSelect">

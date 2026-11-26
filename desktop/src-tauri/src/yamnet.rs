@@ -36,11 +36,62 @@ pub fn remove_yamnet_model(data_dir: &Path) -> Result<(), String> {
 
 // AudioSet YAMNet indices:
 // 0 = Speech
+// 1 = Male speech, man speaking
+// 2 = Female speech, woman speaking
 // 27..35 = Singing / Choir / Yodeling / Chant / Mantra / Male/Female singing
 // 132 = Music
 const SPEECH_IDX: usize = 0;
+const MALE_SPEECH_IDX: usize = 1;
+const FEMALE_SPEECH_IDX: usize = 2;
 const SINGING_INDICES: &[usize] = &[27, 28, 29, 30, 31, 32, 33, 34, 35];
 const MUSIC_IDX: usize = 132;
+
+#[derive(Debug, Clone, Copy)]
+pub struct YamnetFrameScore {
+    pub male: f32,
+    pub female: f32,
+}
+
+pub fn analyze_pcm_gender_frames(
+    data_dir: &Path,
+    samples_f32: &[f32],
+) -> Result<Vec<YamnetFrameScore>, String> {
+    let model_path = yamnet_model_path(data_dir);
+    if !model_path.is_file() || samples_f32.len() < 16_000 {
+        return Ok(Vec::new());
+    }
+    let env = ort::init()
+        .with_name("ytcs_yamnet")
+        .build()
+        .map_err(|e| format!("ORT env error: {e}"))?;
+    let mut session = Session::builder(&env)
+        .map_err(|e| format!("ORT session builder error: {e}"))?
+        .commit_from_file(&model_path)
+        .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))?;
+    let n_samples = samples_f32.len();
+    let input_tensor = Tensor::from_array(([n_samples], samples_f32.to_vec().into_boxed_slice()))
+        .map_err(|e| format!("Failed to create input tensor: {e}"))?;
+    let outputs = session
+        .run(ort::inputs![input_tensor])
+        .map_err(|e| format!("YAMNet inference failed: {e}"))?;
+    let (shape, scores) = outputs[0]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| format!("Failed to extract YAMNet scores: {e}"))?;
+    if shape.len() != 2 || shape[1] < 133 {
+        return Ok(Vec::new());
+    }
+    let num_frames = shape[0] as usize;
+    let num_classes = shape[1] as usize;
+    let mut out = Vec::with_capacity(num_frames);
+    for f in 0..num_frames {
+        let row = &scores[f * num_classes..(f + 1) * num_classes];
+        out.push(YamnetFrameScore {
+            male: row[MALE_SPEECH_IDX],
+            female: row[FEMALE_SPEECH_IDX],
+        });
+    }
+    Ok(out)
+}
 
 pub fn filter_music_and_singing_wav(
     data_dir: &Path,

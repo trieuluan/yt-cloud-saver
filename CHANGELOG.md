@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.34] - 2026-11-27
+
+### Added
+- **Multilingual Speaker Diarization & Cluster-Level Gender Hints:** Added `diarize.rs` using `wespeaker_en_voxceleb_resnet34_LM.onnx` (~26.5 MB via Rust `ort`), 80-bin Log-Mel Fbank (`rustfft`), `F0` pitch estimation, and YAMNet voting to group speakers (`A, B, C...`) and infer cluster gender (`Nam` / `Nữ`) for accurate pronoun translation.
+- **Auto Multi-Voice Dubbing:** Added optional `speaker` metadata (`F:A`, `M:B`, ...) to `SubtitleCue` and an **Auto Multi-Voice** toggle in the Extension popup so VieNeu-TTS / Edge TTS automatically switches between Female and Male voices per character.
+
 ## [1.2.33] - 2026-11-27
 
 ### Improved

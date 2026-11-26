@@ -84,6 +84,10 @@ const yamnetSensHighBtn = document.getElementById('yamnetSensHighBtn');
 const yamnetModelStatus = document.getElementById('yamnetModelStatus');
 const yamnetDlBtn = document.getElementById('yamnetDlBtn');
 const yamnetRmBtn = document.getElementById('yamnetRmBtn');
+const speakerDiarizeInput = document.getElementById('speakerDiarizeInput');
+const wespeakerModelStatus = document.getElementById('wespeakerModelStatus');
+const wespeakerDlBtn = document.getElementById('wespeakerDlBtn');
+const wespeakerRmBtn = document.getElementById('wespeakerRmBtn');
 const whisperMsg = document.getElementById('whisperMsg');
 const vieneuSidecarBadge = document.getElementById('vieneuSidecarBadge');
 const ttsModeEdgeBtn = document.getElementById('ttsModeEdgeBtn');
@@ -291,6 +295,15 @@ function renderWhisperUI(whisper) {
     }
     yamnetDlBtn?.classList.toggle('hidden', yamnetOk);
     yamnetRmBtn?.classList.toggle('hidden', !yamnetOk);
+    const wespeakerOk = Boolean(whisper.wespeakerInstalled);
+    if (wespeakerModelStatus) {
+      wespeakerModelStatus.textContent = wespeakerOk
+        ? '✓ wespeaker_voxceleb.onnx (26.5 MB · Ready)'
+        : 'wespeaker_voxceleb.onnx · Optional (26.5 MB)';
+      wespeakerModelStatus.className = wespeakerOk ? 'tool-ok' : 'muted';
+    }
+    wespeakerDlBtn?.classList.toggle('hidden', wespeakerOk);
+    wespeakerRmBtn?.classList.toggle('hidden', !wespeakerOk);
   }
   const m = whisperModelSelect.value || 'small';
   const modelOk = downloadedWhisperModels.includes(m);
@@ -577,6 +590,7 @@ async function persistSettings() {
         preferWhisperOverAutoCc: preferWhisperInput.checked,
         skipMusicWhisper: skipMusicWhisperInput.checked,
         yamnetSensitivity: currentYamnetSens,
+        useSpeakerDiarization: speakerDiarizeInput.checked,
         embedSubtitles: embedSubtitlesInput.checked,
         ttsMode: currentTtsMode,
         vieneuModel: activeVieneuModel,
@@ -657,6 +671,7 @@ async function loadState() {
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
       skipMusicWhisperInput.checked = data.config.skipMusicWhisper !== false;
       renderYamnetSens(data.config.yamnetSensitivity || 'med');
+      speakerDiarizeInput.checked = Boolean(data.config.useSpeakerDiarization);
       embedSubtitlesInput.checked = Boolean(data.config.embedSubtitles);
       renderTtsMode(data.config.ttsMode || 'edge');
       activeVieneuModel = data.config.vieneuModel || 'v3turbo';
@@ -701,10 +716,40 @@ provBtns.forEach((btn) => {
 });
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
-[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', () => {
+[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, speakerDiarizeInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', () => {
   renderYamnetSens(currentYamnetSens);
   persistSettings();
 }));
+
+wespeakerDlBtn?.addEventListener('click', async () => {
+  whisperMsg.classList.add('hidden');
+  wespeakerDlBtn.disabled = true;
+  wespeakerDlBtn.textContent = 'Downloading...';
+  try {
+    const status = await invoke('download_wespeaker_model_cmd');
+    renderWhisperUI(status);
+  } catch (err) {
+    whisperMsg.textContent = String(err);
+    whisperMsg.classList.remove('hidden');
+  } finally {
+    wespeakerDlBtn.disabled = false;
+    wespeakerDlBtn.textContent = 'Download';
+  }
+});
+
+wespeakerRmBtn?.addEventListener('click', async () => {
+  whisperMsg.classList.add('hidden');
+  wespeakerRmBtn.disabled = true;
+  try {
+    const status = await invoke('remove_wespeaker_model_cmd');
+    renderWhisperUI(status);
+  } catch (err) {
+    whisperMsg.textContent = String(err);
+    whisperMsg.classList.remove('hidden');
+  } finally {
+    wespeakerRmBtn.disabled = false;
+  }
+});
 
 yamnetSensLowBtn?.addEventListener('click', () => { renderYamnetSens('low'); persistSettings(); });
 yamnetSensMedBtn?.addEventListener('click', () => { renderYamnetSens('med'); persistSettings(); });

@@ -16,6 +16,7 @@ pub struct WhisperStatus {
     pub cli_installed: bool,
     pub downloaded_models: Vec<String>,
     pub yamnet_installed: bool,
+    pub wespeaker_installed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -503,6 +504,7 @@ pub fn check_whisper_status(data_dir: &Path, bin_dir: &Path) -> WhisperStatus {
         cli_installed,
         downloaded_models,
         yamnet_installed: crate::yamnet::is_yamnet_installed(data_dir),
+        wespeaker_installed: crate::diarize::is_wespeaker_installed(data_dir),
     }
 }
 

@@ -96,6 +96,8 @@ pub struct AppConfig {
     #[serde(default = "default_yamnet_sensitivity")]
     pub yamnet_sensitivity: String,
     #[serde(default)]
+    pub use_speaker_diarization: bool,
+    #[serde(default)]
     pub embed_subtitles: bool,
     #[serde(default = "default_tts_mode")]
     pub tts_mode: String,
@@ -185,6 +187,7 @@ impl Default for AppConfig {
             prefer_whisper_over_auto_cc: false,
             skip_music_whisper: true,
             yamnet_sensitivity: default_yamnet_sensitivity(),
+            use_speaker_diarization: false,
             embed_subtitles: false,
             tts_mode: default_tts_mode(),
             vieneu_model: default_vieneu_model(),
@@ -222,6 +225,7 @@ pub struct ConfigPatch {
     pub prefer_whisper_over_auto_cc: Option<bool>,
     pub skip_music_whisper: Option<bool>,
     pub yamnet_sensitivity: Option<String>,
+    pub use_speaker_diarization: Option<bool>,
     pub embed_subtitles: Option<bool>,
     pub tts_mode: Option<String>,
     pub vieneu_model: Option<String>,
@@ -336,6 +340,9 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
             "low" | "high" => clean,
             _ => "med".to_string(),
         };
+    }
+    if let Some(sd) = patch.use_speaker_diarization {
+        cfg.use_speaker_diarization = sd;
     }
     if let Some(tm) = patch.tts_mode {
         let clean = tm.trim().to_string();

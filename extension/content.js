@@ -29,6 +29,9 @@
     dubSpeed: 1.0,
     dubVolume: 0.15,
     dubVoiceGain: 1.3,
+    multiVoice: false,
+    dubFemaleVoice: 'vieneu:Ngọc Huyền',
+    dubMaleVoice: 'vieneu:Hải Đăng',
   };
 
   chrome.storage.local.get({ subStyle }, (res) => {
@@ -761,6 +764,46 @@
     return Boolean(text && /[\p{L}\p{N}]/u.test(text));
   }
 
+  const speakerVoiceMap = new Map();
+  function resolveCueVoice(cue) {
+    const base = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    if (base === 'browser' || !subStyle.multiVoice || !cue?.speaker) return base;
+    const sp = String(cue.speaker);
+    const isVieneu = base.startsWith('vieneu:');
+    if (!isVieneu) {
+      if (sp.startsWith('F:')) return 'vi-VN-HoaiMyNeural';
+      if (sp.startsWith('M:')) return 'vi-VN-NamMinhNeural';
+      return base;
+    }
+    const cacheKey = `${subStyle.dubFemaleVoice || ''}|${subStyle.dubMaleVoice || ''}|${sp}`;
+    if (speakerVoiceMap.has(cacheKey)) return speakerVoiceMap.get(cacheKey);
+    if (sp.startsWith('F:')) {
+      const fPool = [
+        subStyle.dubFemaleVoice || 'vieneu:Ngọc Huyền',
+        'vieneu:Thùy Dung',
+        'vieneu:Trúc Ly',
+        'vieneu:Ngọc Trân',
+      ].filter((v, idx, a) => v && a.indexOf(v) === idx);
+      const count = [...speakerVoiceMap.keys()].filter((k) => k.endsWith(`|F:${k.split('|F:')[1]}`)).length;
+      const chosen = fPool[count % fPool.length];
+      speakerVoiceMap.set(cacheKey, chosen);
+      return chosen;
+    }
+    if (sp.startsWith('M:')) {
+      const mPool = [
+        subStyle.dubMaleVoice || 'vieneu:Hải Đăng',
+        'vieneu:Thiện Minh',
+        'vieneu:Quang Sơn',
+        'vieneu:Thái Sơn',
+      ].filter((v, idx, a) => v && a.indexOf(v) === idx);
+      const count = [...speakerVoiceMap.keys()].filter((k) => k.includes('|M:')).length;
+      const chosen = mPool[count % mPool.length];
+      speakerVoiceMap.set(cacheKey, chosen);
+      return chosen;
+    }
+    return base;
+  }
+
   function preloadAudioMeta(audioUrl) {
     return new Promise((resolve) => {
       const a = new Audio();
@@ -823,7 +866,7 @@
   let prepareBatchInFlight = false;
   async function prepareBatchAhead(startIdx, count = 24) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-    if (voice === 'browser' || !subBundle?.cues?.length) return;
+    if (voice === 'browser' || subStyle.multiVoice || !subBundle?.cues?.length) return;
     if (prepareBatchInFlight) return;
     if (preparedFromIdx >= 0 && startIdx >= preparedFromIdx && startIdx + 6 < preparedUpToIdx) return;
 
@@ -849,7 +892,7 @@
   let lastPrefetchedIdx = -1;
   async function prefetchNextCues(idx) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-    if (voice === 'browser' || !subBundle?.cues?.length) return;
+    if (voice === 'browser' || subStyle.multiVoice || !subBundle?.cues?.length) return;
     if (idx === lastPrefetchedIdx) return;
     lastPrefetchedIdx = idx;
     pruneRamCacheWindow(idx, voice, '+15%');
@@ -859,7 +902,8 @@
       const nextCue = subBundle.cues[idx + offset];
       const nextText = nextCue?.translated?.trim();
       if (hasSpeakableText(nextText)) {
-        tasks.push(fetchEdgeTtsAudio(nextText, voice, '+15%').catch(() => {}));
+        const cueVoice = resolveCueVoice(nextCue);
+        tasks.push(fetchEdgeTtsAudio(nextText, cueVoice, '+15%').catch(() => {}));
       }
     }
     if (tasks.length) await Promise.all(tasks);
@@ -915,7 +959,7 @@
       } catch {}
     }
 
-    const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    const voice = resolveCueVoice(cue);
     if (voice === 'browser') {
       if (dubBtnEl) dubBtnEl.title = 'AI Voice Dubbing (Browser TTS)';
       speakCueBrowser(text, cue, video, mySeq);
@@ -1165,9 +1209,10 @@
           // Pre-warm first 4 cues directly into browser RAM cache for instant 0ms playback
           const preloadTasks = [];
           for (let i = curIdx; i < Math.min(subBundle?.cues?.length || 0, curIdx + 4); i += 1) {
-            const t = subBundle.cues[i]?.translated?.trim();
+            const c = subBundle.cues[i];
+            const t = c?.translated?.trim();
             if (hasSpeakableText(t)) {
-              preloadTasks.push(fetchEdgeTtsAudio(t, voice, '+15%').catch(() => {}));
+              preloadTasks.push(fetchEdgeTtsAudio(t, resolveCueVoice(c), '+15%').catch(() => {}));
             }
           }
           if (preloadTasks.length) await Promise.all(preloadTasks);

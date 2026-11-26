@@ -38,6 +38,12 @@ const engBrowserBtn = document.getElementById('engBrowserBtn');
 const dubEngineBadge = document.getElementById('dubEngineBadge');
 const dubVoiceHint = document.getElementById('dubVoiceHint');
 const popupTestVoiceBtn = document.getElementById('popupTestVoiceBtn');
+const multiVoiceRow = document.getElementById('multiVoiceRow');
+const multiVoiceToggle = document.getElementById('multiVoiceToggle');
+const singleVoiceBox = document.getElementById('singleVoiceBox');
+const multiVoiceBox = document.getElementById('multiVoiceBox');
+const dubFemaleSelect = document.getElementById('dubFemaleSelect');
+const dubMaleSelect = document.getElementById('dubMaleSelect');
 const remoteSuggestions = document.getElementById('remoteSuggestions');
 const browseBtn = document.getElementById('browseBtn');
 const browserBox = document.getElementById('browserBox');
@@ -69,6 +75,9 @@ const DEFAULT_SUB_STYLE = {
   dubSpeed: 1.0,
   dubVolume: 0.15,
   dubVoiceGain: 1.3,
+  multiVoice: false,
+  dubFemaleVoice: 'vieneu:Ngọc Huyền',
+  dubMaleVoice: 'vieneu:Hải Đăng',
 };
 
 let subStyle = { ...DEFAULT_SUB_STYLE };
@@ -120,6 +129,7 @@ function renderSubStyle() {
   opacityLabel.textContent = `${subStyle.bgOpacity}%`;
   const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
   const eng = curVoice === 'browser' ? 'browser' : curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
+  if (multiVoiceToggle) multiVoiceToggle.checked = Boolean(subStyle.multiVoice);
   renderDubEngine(eng, curVoice);
   dubSpeedSelect.value = String(Number(subStyle.dubSpeed ?? 1));
   if (dubSpeedBadge) dubSpeedBadge.textContent = `${Number(subStyle.dubSpeed ?? 1).toFixed(1)}x`;
@@ -204,6 +214,34 @@ function renderDubEngine(eng, selectedVoice) {
   }
   const match = list.find((i) => i.value === selectedVoice);
   dubVoiceSelect.value = match ? selectedVoice : list[0]?.value || 'vi-VN-HoaiMyNeural';
+
+  const isMulti = Boolean(subStyle.multiVoice) && eng !== 'browser';
+  multiVoiceRow?.classList.toggle('hidden', eng === 'browser');
+  singleVoiceBox?.classList.toggle('hidden', isMulti);
+  multiVoiceBox?.classList.toggle('hidden', !isMulti);
+
+  if (dubFemaleSelect && dubMaleSelect) {
+    const fOpts = eng === 'edge'
+      ? [{ value: 'vi-VN-HoaiMyNeural', label: 'Hoài Mỹ (Edge)' }]
+      : [
+          ...customVieneuVoices.map((v) => ({ value: `vieneu:custom:${v.id}`, label: `🎙 ${v.name}` })),
+          ...VIENEU_PRESET_VOICES.filter((v) => v.value !== 'vieneu:default'),
+        ];
+    const mOpts = eng === 'edge'
+      ? [{ value: 'vi-VN-NamMinhNeural', label: 'Nam Minh (Edge)' }]
+      : [
+          ...customVieneuVoices.map((v) => ({ value: `vieneu:custom:${v.id}`, label: `🎙 ${v.name}` })),
+          ...VIENEU_PRESET_VOICES.filter((v) => v.value !== 'vieneu:default'),
+        ];
+    dubFemaleSelect.innerHTML = fOpts.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    dubMaleSelect.innerHTML = mOpts.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    dubFemaleSelect.value = fOpts.some((o) => o.value === subStyle.dubFemaleVoice)
+      ? subStyle.dubFemaleVoice
+      : fOpts[0]?.value || '';
+    dubMaleSelect.value = mOpts.some((o) => o.value === subStyle.dubMaleVoice)
+      ? subStyle.dubMaleVoice
+      : (mOpts.find((o) => o.value.includes('Hải Đăng'))?.value || mOpts[0]?.value || '');
+  }
 }
 
 async function saveSubStyle() {
@@ -521,6 +559,18 @@ opacitySlider.addEventListener('input', () => {
 });
 dubVoiceSelect.addEventListener('change', () => {
   subStyle.dubVoice = dubVoiceSelect.value;
+  saveSubStyle();
+});
+multiVoiceToggle?.addEventListener('change', () => {
+  subStyle.multiVoice = multiVoiceToggle.checked;
+  saveSubStyle();
+});
+dubFemaleSelect?.addEventListener('change', () => {
+  subStyle.dubFemaleVoice = dubFemaleSelect.value;
+  saveSubStyle();
+});
+dubMaleSelect?.addEventListener('change', () => {
+  subStyle.dubMaleVoice = dubMaleSelect.value;
   saveSubStyle();
 });
 dubSpeedSelect.addEventListener('change', () => {
