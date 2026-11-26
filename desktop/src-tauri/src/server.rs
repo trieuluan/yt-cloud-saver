@@ -273,19 +273,66 @@ struct TtsQuery {
     rate: Option<String>,
 }
 
+fn resolve_vieneu_voice<'a>(cfg: &'a crate::config::AppConfig, raw_vid: &'a str) -> (&'a str, &'a str) {
+    let req_vid = if raw_vid.trim().is_empty() || raw_vid == "default" {
+        cfg.vieneu_voice.as_str()
+    } else {
+        raw_vid.trim()
+    };
+    if let Some(cid) = req_vid.strip_prefix("custom:") {
+        if let Some(found) = cfg.custom_voices.iter().find(|v| v.id == cid) {
+            return ("custom", found.ref_audio.as_str());
+        }
+    }
+    (req_vid, cfg.vieneu_ref_audio.as_str())
+}
+
 async fn get_tts(
     State(st): State<ServerState>,
     Query(q): Query<TtsQuery>,
 ) -> Response {
-    match crate::tts::synthesize_edge_tts_with_fallback(
-        &st.data_dir,
-        &st.bin_dir,
-        &q.text,
-        q.voice.as_deref(),
-        q.rate.as_deref(),
-    )
-    .await
-    {
+    let voice_req = q.voice.as_deref().unwrap_or("");
+    let cfg = load_config(&st.data_dir);
+    let res = if let Some(raw_vid) = voice_req.strip_prefix("vieneu:") {
+        let (vid, ref_audio) = resolve_vieneu_voice(&cfg, raw_vid);
+        match crate::vieneu::synthesize_vieneu_tts(
+            &st.data_dir,
+            &st.bin_dir,
+            &cfg.vieneu_model,
+            &q.text,
+            vid,
+            ref_audio,
+        )
+        .await
+        {
+            Ok(bytes) => Ok(bytes),
+            Err(_) => {
+                crate::tts::synthesize_edge_tts_with_fallback(
+                    &st.data_dir,
+                    &st.bin_dir,
+                    &q.text,
+                    Some("vi-VN-HoaiMyNeural"),
+                    q.rate.as_deref(),
+                )
+                .await
+            }
+        }
+    } else {
+        match crate::tts::synthesize_edge_tts_with_fallback(
+            &st.data_dir,
+            &st.bin_dir,
+            &q.text,
+            q.voice.as_deref(),
+            q.rate.as_deref(),
+        )
+        .await
+        {
+            Ok(bytes) => Ok(bytes),
+            Err(err) => Err(err),
+        }
+    };
+
+    match res {
         Ok(bytes) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "audio/mpeg")
@@ -308,14 +355,50 @@ async fn post_tts_prepare(
     Json(body): Json<TtsPrepareBody>,
 ) -> impl IntoResponse {
     let total = body.texts.len();
-    let ready = crate::tts::prepare_edge_tts_batch(
-        &st.data_dir,
-        body.texts,
-        body.voice,
-        body.rate,
-    )
-    .await;
+    let voice_req = body.voice.as_deref().unwrap_or("");
+    let ready = if let Some(raw_vid) = voice_req.strip_prefix("vieneu:") {
+        let cfg = load_config(&st.data_dir);
+        let (vid, ref_audio) = resolve_vieneu_voice(&cfg, raw_vid);
+        let mut count = 0usize;
+        for text in body.texts {
+            if crate::vieneu::synthesize_vieneu_tts(
+                &st.data_dir,
+                &st.bin_dir,
+                &cfg.vieneu_model,
+                &text,
+                vid,
+                ref_audio,
+            )
+            .await
+            .is_ok()
+            {
+                count += 1;
+            }
+        }
+        count
+    } else {
+        crate::tts::prepare_edge_tts_batch(
+            &st.data_dir,
+            body.texts,
+            body.voice,
+            body.rate,
+        )
+        .await
+    };
     Json(json!({ "ready": ready, "total": total }))
+}
+
+async fn get_vieneu_status(State(st): State<ServerState>) -> impl IntoResponse {
+    let status = crate::vieneu::check_vieneu_status(&st.data_dir);
+    let cfg = load_config(&st.data_dir);
+    Json(json!({
+        "runtimeInstalled": status.runtime_installed,
+        "downloadedModels": status.downloaded_models,
+        "sidecarRunning": status.sidecar_running,
+        "activeModel": cfg.vieneu_model,
+        "defaultVoice": cfg.vieneu_voice,
+        "customVoices": cfg.custom_voices,
+    }))
 }
 
 pub async fn start_server(state: ServerState) {
@@ -374,6 +457,7 @@ pub async fn start_server(state: ServerState) {
         .route("/stream/{video_id}", get(stream_video))
         .route("/tts", get(get_tts))
         .route("/tts/prepare", post(post_tts_prepare))
+        .route("/vieneu/status", get(get_vieneu_status))
         .route("/show", post(show_app))
         .layer(CorsLayer::permissive())
         .with_state(state);

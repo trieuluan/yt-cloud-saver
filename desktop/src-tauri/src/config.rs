@@ -14,6 +14,14 @@ pub struct AiProfile {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomVoice {
+    pub id: String,
+    pub name: String,
+    pub ref_audio: String,
+}
+
 fn default_ai_profiles() -> HashMap<String, AiProfile> {
     let mut map = HashMap::new();
     map.insert(
@@ -85,6 +93,16 @@ pub struct AppConfig {
     pub prefer_whisper_over_auto_cc: bool,
     #[serde(default)]
     pub embed_subtitles: bool,
+    #[serde(default = "default_tts_mode")]
+    pub tts_mode: String,
+    #[serde(default = "default_vieneu_model")]
+    pub vieneu_model: String,
+    #[serde(default = "default_vieneu_voice")]
+    pub vieneu_voice: String,
+    #[serde(default)]
+    pub vieneu_ref_audio: String,
+    #[serde(default)]
+    pub custom_voices: Vec<CustomVoice>,
     pub max_concurrent: usize,
     pub keep_local: bool,
     pub temp_dir: String,
@@ -120,6 +138,15 @@ fn default_whisper_cloud_base_url() -> String {
 fn default_whisper_cloud_model() -> String {
     "whisper-large-v3-turbo".to_string()
 }
+fn default_tts_mode() -> String {
+    "edge".to_string()
+}
+fn default_vieneu_model() -> String {
+    "v3turbo".to_string()
+}
+fn default_vieneu_voice() -> String {
+    "Ngọc Huyền".to_string()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -150,6 +177,11 @@ impl Default for AppConfig {
             whisper_cloud_model: default_whisper_cloud_model(),
             prefer_whisper_over_auto_cc: false,
             embed_subtitles: false,
+            tts_mode: default_tts_mode(),
+            vieneu_model: default_vieneu_model(),
+            vieneu_voice: default_vieneu_voice(),
+            vieneu_ref_audio: String::new(),
+            custom_voices: Vec::new(),
             max_concurrent: 2,
             keep_local: false,
             temp_dir,
@@ -180,6 +212,11 @@ pub struct ConfigPatch {
     pub whisper_cloud_model: Option<String>,
     pub prefer_whisper_over_auto_cc: Option<bool>,
     pub embed_subtitles: Option<bool>,
+    pub tts_mode: Option<String>,
+    pub vieneu_model: Option<String>,
+    pub vieneu_voice: Option<String>,
+    pub vieneu_ref_audio: Option<String>,
+    pub custom_voices: Option<Vec<CustomVoice>>,
     pub max_concurrent: Option<usize>,
     pub keep_local: Option<bool>,
 }
@@ -278,6 +315,31 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(pw) = patch.prefer_whisper_over_auto_cc {
         cfg.prefer_whisper_over_auto_cc = pw;
+    }
+    if let Some(tm) = patch.tts_mode {
+        let clean = tm.trim().to_string();
+        cfg.tts_mode = if clean == "vieneu" { "vieneu".to_string() } else { "edge".to_string() };
+    }
+    if let Some(vm) = patch.vieneu_model {
+        let clean = vm.trim().to_string();
+        if !clean.is_empty() {
+            cfg.vieneu_model = clean;
+        }
+    }
+    if let Some(vv) = patch.vieneu_voice {
+        let clean = vv.trim().to_string();
+        if !clean.is_empty() {
+            cfg.vieneu_voice = clean;
+        }
+    }
+    if let Some(vr) = patch.vieneu_ref_audio {
+        cfg.vieneu_ref_audio = vr.trim().to_string();
+    }
+    if let Some(cv) = patch.custom_voices {
+        cfg.custom_voices = cv
+            .into_iter()
+            .filter(|v| !v.id.trim().is_empty() && !v.name.trim().is_empty() && !v.ref_audio.trim().is_empty())
+            .collect();
     }
     if let Some(embed) = patch.embed_subtitles {
         cfg.embed_subtitles = embed;

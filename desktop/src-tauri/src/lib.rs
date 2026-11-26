@@ -5,6 +5,7 @@ mod server;
 mod tools;
 mod translate;
 mod tts;
+mod vieneu;
 
 use config::{load_config, save_config, AppConfig, ConfigPatch};
 use jobs::{EnqueueRequest, Job, JobManager, SavedIdsCache};
@@ -23,6 +24,10 @@ use tools::{
     list_remotes, remove_whisper_cli, remove_whisper_model, ToolsStatus, WhisperStatus,
 };
 use translate::SubtitleSummary;
+use vieneu::{
+    check_vieneu_status, download_vieneu_model, install_vieneu_runtime, remove_vieneu_model,
+    remove_vieneu_runtime, stop_vieneu_sidecar, VieneuStatus,
+};
 
 pub struct AppState {
     pub data_dir: PathBuf,
@@ -37,6 +42,7 @@ pub struct DashboardState {
     pub app_version: String,
     pub tools: ToolsStatus,
     pub whisper: WhisperStatus,
+    pub vieneu: VieneuStatus,
     pub remotes: Vec<String>,
     pub config: AppConfig,
     pub jobs: Vec<Job>,
@@ -54,12 +60,14 @@ async fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardStat
         state.jobs.get_saved_ids()
     );
     let whisper = check_whisper_status(&state.data_dir, &state.bin_dir);
+    let vieneu = check_vieneu_status(&state.data_dir);
     let translations = translate::list_cached_subtitles(&state.data_dir);
     let config = load_config(&state.data_dir);
     Ok(DashboardState {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         tools,
         whisper,
+        vieneu,
         remotes,
         config,
         jobs,
@@ -126,6 +134,63 @@ async fn remove_whisper_model_cmd(
 ) -> Result<WhisperStatus, String> {
     remove_whisper_model(&state.data_dir, &model_name)?;
     Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
+}
+
+#[tauri::command]
+async fn install_vieneu_runtime_cmd(state: State<'_, AppState>) -> Result<VieneuStatus, String> {
+    install_vieneu_runtime(&state.data_dir, &state.bin_dir).await?;
+    Ok(check_vieneu_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn remove_vieneu_runtime_cmd(state: State<'_, AppState>) -> Result<VieneuStatus, String> {
+    remove_vieneu_runtime(&state.data_dir).await?;
+    Ok(check_vieneu_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn download_vieneu_model_cmd(
+    state: State<'_, AppState>,
+    model_name: String,
+) -> Result<VieneuStatus, String> {
+    download_vieneu_model(&state.data_dir, &model_name).await?;
+    Ok(check_vieneu_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn remove_vieneu_model_cmd(
+    state: State<'_, AppState>,
+    model_name: String,
+) -> Result<VieneuStatus, String> {
+    remove_vieneu_model(&state.data_dir, &model_name).await?;
+    Ok(check_vieneu_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn stop_vieneu_sidecar_cmd(state: State<'_, AppState>) -> Result<VieneuStatus, String> {
+    stop_vieneu_sidecar().await;
+    Ok(check_vieneu_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn pick_audio_file_cmd() -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = tokio::process::Command::new("osascript")
+            .args([
+                "-e",
+                "try\nPOSIX path of (choose file with prompt \"Select Reference Audio (.wav / .mp3, 3-8s)\")\non error\n\"\"\nend try",
+            ])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to open file picker: {e}"))?;
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Ok(if path.is_empty() { None } else { Some(path) });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -446,6 +511,12 @@ pub fn run() {
             remove_whisper_cli_cmd,
             download_whisper_model_cmd,
             remove_whisper_model_cmd,
+            install_vieneu_runtime_cmd,
+            remove_vieneu_runtime_cmd,
+            download_vieneu_model_cmd,
+            remove_vieneu_model_cmd,
+            stop_vieneu_sidecar_cmd,
+            pick_audio_file_cmd,
             open_extension_folder,
             open_chrome_extensions
         ])
@@ -457,6 +528,7 @@ pub fn run() {
                 let serve = Arc::clone(&st.rclone_serve);
                 tauri::async_runtime::block_on(async move {
                     serve.stop().await;
+                    stop_vieneu_sidecar().await;
                 });
             }
             #[cfg(target_os = "macos")]

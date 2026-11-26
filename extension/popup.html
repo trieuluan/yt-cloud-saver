@@ -93,11 +93,26 @@
         <div class="between">
           <span class="label-sm">Dubbing Voice</span>
           <select id="dubVoiceSelect" class="select-compact">
-            <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
-            <option value="vi-VN-NamMinhNeural">Nam Minh (Nam · Edge AI)</option>
-            <option value="en-US-AriaNeural">Aria (EN · Edge AI)</option>
-            <option value="en-US-GuyNeural">Guy (EN · Edge AI)</option>
-            <option value="browser">Browser TTS (Fallback)</option>
+            <optgroup label="☁️ Online (Edge AI)">
+              <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
+              <option value="vi-VN-NamMinhNeural">Nam Minh (Nam · Edge AI)</option>
+              <option value="en-US-AriaNeural">Aria (EN · Edge AI)</option>
+              <option value="en-US-GuyNeural">Guy (EN · Edge AI)</option>
+            </optgroup>
+            <optgroup id="dubVieneuGroup" label="🖥 Local Offline (VieNeu-TTS)">
+              <option value="vieneu:default">VieNeu · Mặc định (theo Desktop)</option>
+              <option value="vieneu:Ngọc Huyền">VieNeu · Ngọc Huyền (Nữ Bắc)</option>
+              <option value="vieneu:Trúc Ly">VieNeu · Trúc Ly (Nữ Bắc)</option>
+              <option value="vieneu:Thùy Dung">VieNeu · Thùy Dung (Nữ Nam)</option>
+              <option value="vieneu:Ngọc Trân">VieNeu · Ngọc Trân (Nữ Trung)</option>
+              <option value="vieneu:Hải Đăng">VieNeu · Hải Đăng (Nam Bắc)</option>
+              <option value="vieneu:Thiện Minh">VieNeu · Thiện Minh (Nam Bắc)</option>
+              <option value="vieneu:Quang Sơn">VieNeu · Quang Sơn (Nam Trung)</option>
+              <option value="vieneu:Thái Sơn">VieNeu · Thái Sơn (Nam Nam)</option>
+            </optgroup>
+            <optgroup label="🔊 Fallback">
+              <option value="browser">Browser TTS (Fallback)</option>
+            </optgroup>
           </select>
         </div>
         <div class="between">

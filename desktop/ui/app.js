@@ -77,6 +77,26 @@ const whisperModelStatus = document.getElementById('whisperModelStatus');
 const whisperModelDlBtn = document.getElementById('whisperModelDlBtn');
 const whisperModelRmBtn = document.getElementById('whisperModelRmBtn');
 const whisperMsg = document.getElementById('whisperMsg');
+const vieneuSidecarBadge = document.getElementById('vieneuSidecarBadge');
+const ttsModeEdgeBtn = document.getElementById('ttsModeEdgeBtn');
+const ttsModeLocalBtn = document.getElementById('ttsModeLocalBtn');
+const ttsEdgePanel = document.getElementById('ttsEdgePanel');
+const ttsLocalPanel = document.getElementById('ttsLocalPanel');
+const vieneuRuntimeStatus = document.getElementById('vieneuRuntimeStatus');
+const vieneuInstallBtn = document.getElementById('vieneuInstallBtn');
+const vieneuRemoveBtn = document.getElementById('vieneuRemoveBtn');
+const vieneuVariantList = document.getElementById('vieneuVariantList');
+const vieneuVoiceSelect = document.getElementById('vieneuVoiceSelect');
+const vieneuCustomOptGroup = document.getElementById('vieneuCustomOptGroup');
+const vieneuTestVoiceBtn = document.getElementById('vieneuTestVoiceBtn');
+const vieneuDelVoiceBtn = document.getElementById('vieneuDelVoiceBtn');
+const vieneuRefAudioRow = document.getElementById('vieneuRefAudioRow');
+const vieneuCustomNameInput = document.getElementById('vieneuCustomNameInput');
+const vieneuRefAudioInput = document.getElementById('vieneuRefAudioInput');
+const vieneuBrowseAudioBtn = document.getElementById('vieneuBrowseAudioBtn');
+const vieneuSaveCustomBtn = document.getElementById('vieneuSaveCustomBtn');
+const vieneuCancelCustomBtn = document.getElementById('vieneuCancelCustomBtn');
+const vieneuMsg = document.getElementById('vieneuMsg');
 const embedSubtitlesInput = document.getElementById('embedSubtitlesInput');
 const aiSettingsMsg = document.getElementById('aiSettingsMsg');
 
@@ -102,6 +122,13 @@ let configHydrated = false;
 let currentBrowsePath = '';
 let saveTimer = null;
 let downloadedWhisperModels = [];
+let currentTtsMode = 'edge';
+let activeVieneuModel = 'v3turbo';
+let vieneuRuntimeInstalled = false;
+let downloadedVieneuModels = [];
+let downloadingVieneuModel = '';
+let customVoices = [];
+let lastValidVieneuVoice = 'Ngọc Huyền';
 let activityFilter = 'all';
 let latestJobs = [];
 let latestTranslations = [];
@@ -114,6 +141,108 @@ const WHISPER_SIZES = {
   'large-v3-turbo-q5_0': '574 MB',
   'large-v3-turbo': '1.62 GB',
 };
+
+const VIENEU_VARIANTS = [
+  {
+    id: 'v3turbo',
+    name: 'VieNeu-TTS v3 Turbo',
+    size: '~580 MB · 48kHz',
+    badge: 'Khuyên dùng · Nhanh nhất',
+    desc: 'ONNX CPU ~300ms/câu, hỗ trợ tốt tiếng Việt & Anh xen kẽ',
+  },
+  {
+    id: 'v3nano',
+    name: 'VieNeu-TTS v3 Nano',
+    size: '~180 MB · 24kHz',
+    badge: 'Siêu nhẹ CPU',
+    desc: '48M-param tối ưu cho máy cấu hình yếu hoặc tiết kiệm RAM',
+  },
+];
+
+function renderTtsMode(mode) {
+  currentTtsMode = mode === 'vieneu' ? 'vieneu' : 'edge';
+  const isLocal = currentTtsMode === 'vieneu';
+  ttsModeEdgeBtn.classList.toggle('active', !isLocal);
+  ttsModeLocalBtn.classList.toggle('active', isLocal);
+  ttsEdgePanel.classList.toggle('hidden', isLocal);
+  ttsLocalPanel.classList.toggle('hidden', !isLocal);
+}
+
+function renderCustomVoicesOptions() {
+  if (!vieneuCustomOptGroup) return;
+  vieneuCustomOptGroup.innerHTML = customVoices
+    .map((v) => `<option value="custom:${escapeHtml(v.id)}">🎙 ${escapeHtml(v.name)}</option>`)
+    .join('');
+  vieneuCustomOptGroup.style.display = customVoices.length ? '' : 'none';
+}
+
+function renderVieneuUI(vieneu) {
+  if (vieneu) {
+    vieneuRuntimeInstalled = Boolean(vieneu.runtimeInstalled);
+    downloadedVieneuModels = vieneu.downloadedModels || [];
+    vieneuRuntimeStatus.textContent = vieneuRuntimeInstalled
+      ? '✓ Installed · Sẵn sàng chạy local'
+      : 'Not installed (~650 MB venv)';
+    vieneuRuntimeStatus.className = vieneuRuntimeInstalled ? 'tool-ok' : 'muted';
+    vieneuInstallBtn.classList.toggle('hidden', vieneuRuntimeInstalled);
+    vieneuRemoveBtn.classList.toggle('hidden', !vieneuRuntimeInstalled);
+    if (vieneuSidecarBadge) {
+      vieneuSidecarBadge.textContent = vieneu.sidecarRunning
+        ? `Sidecar: Ready (${activeVieneuModel}) · Stop`
+        : 'Sidecar: Off';
+      vieneuSidecarBadge.className = vieneu.sidecarRunning ? 'tool-ok' : 'muted';
+      vieneuSidecarBadge.style.cursor = vieneu.sidecarRunning ? 'pointer' : 'default';
+      vieneuSidecarBadge.title = vieneu.sidecarRunning
+        ? 'Bấm để dừng Sidecar giải phóng RAM (hoặc tự tắt sau 3 phút không dùng)'
+        : 'Tự bật khi lồng tiếng VieNeu-TTS';
+    }
+  }
+  vieneuVariantList.innerHTML = VIENEU_VARIANTS.map((v) => {
+    const isDl = downloadedVieneuModels.includes(v.id);
+    const isBusy = downloadingVieneuModel === v.id;
+    const isActive = isDl && activeVieneuModel === v.id;
+    let btns = '';
+    if (isBusy) {
+      btns = '<span class="muted">Downloading...</span>';
+    } else if (isDl) {
+      btns = `
+        ${isActive ? '<span class="variant-tag rec">Đang dùng</span>' : `<button class="btn-ghost btn-xs" type="button" data-vn-use="${v.id}">Use</button>`}
+        <button class="btn-danger-ghost btn-xs" type="button" data-vn-rm="${v.id}">Remove</button>
+      `;
+    } else {
+      btns = `<button class="btn-primary btn-xs" type="button" data-vn-dl="${v.id}" ${vieneuRuntimeInstalled ? '' : 'disabled title="Cài Runtime trước"'}>Download</button>`;
+    }
+    return `
+      <div class="variant-item ${isActive ? 'active-model' : ''}">
+        <div style="min-width:0;">
+          <div>
+            <span class="sub-title">${escapeHtml(v.name)}</span>
+            <span class="variant-tag">${escapeHtml(v.size)}</span>
+            <span class="variant-tag rec">${escapeHtml(v.badge)}</span>
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:2px;">${escapeHtml(v.desc)}</div>
+        </div>
+        <div class="btn-group">${btns}</div>
+      </div>
+    `;
+  }).join('');
+  const isAddingCustom = vieneuVoiceSelect.value === '__add_custom__';
+  const isCustomSelected = vieneuVoiceSelect.value.startsWith('custom:');
+  vieneuRefAudioRow.classList.toggle('hidden', !isAddingCustom);
+  if (vieneuDelVoiceBtn) {
+    vieneuDelVoiceBtn.classList.toggle('hidden', !isCustomSelected);
+  }
+  if (vieneuTestVoiceBtn) {
+    const canTest =
+      vieneuRuntimeInstalled &&
+      downloadedVieneuModels.includes(activeVieneuModel) &&
+      !isAddingCustom;
+    vieneuTestVoiceBtn.disabled = !canTest;
+    vieneuTestVoiceBtn.title = canTest
+      ? 'Nghe thử giọng đang chọn'
+      : 'Cần cài Runtime và tải ít nhất 1 Model để nghe thử';
+  }
+}
 
 let currentWhisperMode = 'local';
 
@@ -393,6 +522,7 @@ async function openDirectory(remotePath, allowFallback = true) {
 }
 
 async function persistSettings() {
+  if (!configHydrated) return;
   try {
     saveCurrentProviderInputs();
     const active = aiProfiles[currentAiProvider];
@@ -418,6 +548,14 @@ async function persistSettings() {
         whisperCloudModel: whisperCloudModelInput.value.trim(),
         preferWhisperOverAutoCc: preferWhisperInput.checked,
         embedSubtitles: embedSubtitlesInput.checked,
+        ttsMode: currentTtsMode,
+        vieneuModel: activeVieneuModel,
+        vieneuVoice:
+          vieneuVoiceSelect.value === '__add_custom__'
+            ? lastValidVieneuVoice
+            : vieneuVoiceSelect.value,
+        vieneuRefAudio: vieneuRefAudioInput.value.trim(),
+        customVoices,
       },
     });
     settingsMsg.textContent = '✓ Settings auto-saved';
@@ -488,9 +626,21 @@ async function loadState() {
       whisperCloudModelInput.value = data.config.whisperCloudModel || 'whisper-large-v3-turbo';
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
       embedSubtitlesInput.checked = Boolean(data.config.embedSubtitles);
+      renderTtsMode(data.config.ttsMode || 'edge');
+      activeVieneuModel = data.config.vieneuModel || 'v3turbo';
+      customVoices = Array.isArray(data.config.customVoices) ? data.config.customVoices : [];
+      renderCustomVoicesOptions();
+      lastValidVieneuVoice = data.config.vieneuVoice || 'Ngọc Huyền';
+      vieneuVoiceSelect.value = lastValidVieneuVoice;
+      if (!vieneuVoiceSelect.value) {
+        lastValidVieneuVoice = 'Ngọc Huyền';
+        vieneuVoiceSelect.value = 'Ngọc Huyền';
+      }
+      vieneuRefAudioInput.value = data.config.vieneuRefAudio || '';
       updatePathPreview();
     }
     renderWhisperUI(data.whisper);
+    renderVieneuUI(data.vieneu);
 
     const count = data.savedCount || 0;
     syncStatusText.textContent = data.lastSyncedAt
@@ -622,6 +772,242 @@ whisperModelRmBtn.addEventListener('click', async () => {
     whisperMsg.classList.remove('hidden');
   } finally {
     whisperModelRmBtn.disabled = false;
+  }
+});
+
+ttsModeEdgeBtn.addEventListener('click', () => {
+  renderTtsMode('edge');
+  persistSettings();
+});
+
+ttsModeLocalBtn.addEventListener('click', () => {
+  renderTtsMode('vieneu');
+  persistSettings();
+});
+
+vieneuVoiceSelect.addEventListener('change', () => {
+  if (vieneuVoiceSelect.value === '__add_custom__') {
+    vieneuCustomNameInput.value = '';
+    vieneuRefAudioInput.value = '';
+    renderVieneuUI();
+    vieneuCustomNameInput.focus();
+    return;
+  }
+  lastValidVieneuVoice = vieneuVoiceSelect.value;
+  renderVieneuUI();
+  persistSettings();
+});
+
+if (vieneuSaveCustomBtn) {
+  vieneuSaveCustomBtn.addEventListener('click', async () => {
+    vieneuMsg.classList.add('hidden');
+    const name = (vieneuCustomNameInput.value || '').trim();
+    const refAudio = (vieneuRefAudioInput.value || '').trim();
+    if (!name) {
+      vieneuMsg.textContent = 'Vui lòng nhập tên cho Custom Voice.';
+      vieneuMsg.classList.remove('hidden');
+      return;
+    }
+    if (!refAudio) {
+      vieneuMsg.textContent = 'Vui lòng kéo thả hoặc chọn file audio mẫu (3–8s).';
+      vieneuMsg.classList.remove('hidden');
+      return;
+    }
+    const id = `${Date.now().toString(36)}`;
+    customVoices.push({ id, name, refAudio });
+    renderCustomVoicesOptions();
+    lastValidVieneuVoice = `custom:${id}`;
+    vieneuVoiceSelect.value = lastValidVieneuVoice;
+    renderVieneuUI();
+    await persistSettings();
+  });
+}
+
+if (vieneuCancelCustomBtn) {
+  vieneuCancelCustomBtn.addEventListener('click', () => {
+    vieneuMsg.classList.add('hidden');
+    vieneuVoiceSelect.value = lastValidVieneuVoice;
+    renderVieneuUI();
+  });
+}
+
+if (vieneuDelVoiceBtn) {
+  vieneuDelVoiceBtn.addEventListener('click', async () => {
+    const val = vieneuVoiceSelect.value;
+    if (!val.startsWith('custom:')) return;
+    const cid = val.slice('custom:'.length);
+    customVoices = customVoices.filter((v) => v.id !== cid);
+    renderCustomVoicesOptions();
+    lastValidVieneuVoice = 'Ngọc Huyền';
+    vieneuVoiceSelect.value = 'Ngọc Huyền';
+    renderVieneuUI();
+    await persistSettings();
+  });
+}
+
+if (vieneuSidecarBadge) {
+  vieneuSidecarBadge.addEventListener('click', async () => {
+    if (!vieneuSidecarBadge.textContent.includes('Ready')) return;
+    try {
+      const status = await invoke('stop_vieneu_sidecar_cmd');
+      renderVieneuUI(status);
+    } catch {}
+  });
+}
+
+vieneuRefAudioInput.addEventListener('change', persistSettings);
+
+if (vieneuBrowseAudioBtn) {
+  vieneuBrowseAudioBtn.addEventListener('click', async () => {
+    try {
+      const picked = await invoke('pick_audio_file_cmd');
+      if (picked) {
+        vieneuRefAudioInput.value = picked;
+        persistSettings();
+      }
+    } catch (err) {
+      vieneuMsg.textContent = String(err);
+      vieneuMsg.classList.remove('hidden');
+    }
+  });
+}
+
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen('tauri://drag-enter', () => {
+    if (vieneuVoiceSelect.value === '__add_custom__' && !ttsLocalPanel.classList.contains('hidden')) {
+      vieneuRefAudioInput.style.borderColor = '#3b82f6';
+    }
+  });
+  window.__TAURI__.event.listen('tauri://drag-leave', () => {
+    vieneuRefAudioInput.style.borderColor = '';
+  });
+  window.__TAURI__.event.listen('tauri://drag-drop', (event) => {
+    vieneuRefAudioInput.style.borderColor = '';
+    if (vieneuVoiceSelect.value !== '__add_custom__' || ttsLocalPanel.classList.contains('hidden')) return;
+    const paths = event?.payload?.paths;
+    if (Array.isArray(paths) && paths.length > 0) {
+      const audioPath = paths.find((p) => /\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(p)) || paths[0];
+      if (audioPath) {
+        vieneuRefAudioInput.value = audioPath;
+      }
+    }
+  });
+}
+
+let vieneuPreviewAudio = null;
+vieneuTestVoiceBtn.addEventListener('click', async () => {
+  if (vieneuPreviewAudio && !vieneuPreviewAudio.paused) {
+    vieneuPreviewAudio.pause();
+    vieneuPreviewAudio = null;
+    vieneuTestVoiceBtn.textContent = '▶ Test';
+    return;
+  }
+  vieneuMsg.classList.add('hidden');
+  vieneuTestVoiceBtn.disabled = true;
+  vieneuTestVoiceBtn.textContent = 'Loading...';
+  try {
+    await persistSettings();
+    const voice = vieneuVoiceSelect.value || 'Ngọc Huyền';
+    const sample = 'Xin chào, đây là giọng đọc thử của VieNeu TTS trên YT Cloud Saver.';
+    const url = `http://127.0.0.1:4873/tts?voice=${encodeURIComponent(`vieneu:${voice}`)}&text=${encodeURIComponent(sample)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objUrl);
+    vieneuPreviewAudio = audio;
+    vieneuTestVoiceBtn.textContent = '■ Stop';
+    audio.onended = () => {
+      URL.revokeObjectURL(objUrl);
+      if (vieneuPreviewAudio === audio) vieneuPreviewAudio = null;
+      vieneuTestVoiceBtn.textContent = '▶ Test';
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      if (vieneuPreviewAudio === audio) vieneuPreviewAudio = null;
+      vieneuTestVoiceBtn.textContent = '▶ Test';
+    };
+    await audio.play();
+  } catch (err) {
+    vieneuMsg.textContent = `Test voice failed: ${err}`;
+    vieneuMsg.classList.remove('hidden');
+    vieneuTestVoiceBtn.textContent = '▶ Test';
+  } finally {
+    renderVieneuUI();
+  }
+});
+
+vieneuInstallBtn.addEventListener('click', async () => {
+  vieneuMsg.classList.add('hidden');
+  vieneuInstallBtn.disabled = true;
+  vieneuInstallBtn.textContent = 'Installing...';
+  try {
+    const status = await invoke('install_vieneu_runtime_cmd');
+    renderVieneuUI(status);
+  } catch (err) {
+    vieneuMsg.textContent = String(err);
+    vieneuMsg.classList.remove('hidden');
+  } finally {
+    vieneuInstallBtn.disabled = false;
+    vieneuInstallBtn.textContent = 'Install';
+  }
+});
+
+vieneuRemoveBtn.addEventListener('click', async () => {
+  vieneuMsg.classList.add('hidden');
+  vieneuRemoveBtn.disabled = true;
+  try {
+    const status = await invoke('remove_vieneu_runtime_cmd');
+    renderVieneuUI(status);
+  } catch (err) {
+    vieneuMsg.textContent = String(err);
+    vieneuMsg.classList.remove('hidden');
+  } finally {
+    vieneuRemoveBtn.disabled = false;
+  }
+});
+
+vieneuVariantList.addEventListener('click', async (e) => {
+  const dlId = e.target.getAttribute('data-vn-dl');
+  const useId = e.target.getAttribute('data-vn-use');
+  const rmId = e.target.getAttribute('data-vn-rm');
+  if (useId) {
+    activeVieneuModel = useId;
+    renderVieneuUI();
+    persistSettings();
+    return;
+  }
+  if (dlId) {
+    vieneuMsg.classList.add('hidden');
+    downloadingVieneuModel = dlId;
+    renderVieneuUI();
+    try {
+      const status = await invoke('download_vieneu_model_cmd', { modelName: dlId });
+      activeVieneuModel = dlId;
+      downloadingVieneuModel = '';
+      renderVieneuUI(status);
+      persistSettings();
+    } catch (err) {
+      downloadingVieneuModel = '';
+      renderVieneuUI();
+      vieneuMsg.textContent = String(err);
+      vieneuMsg.classList.remove('hidden');
+    }
+    return;
+  }
+  if (rmId) {
+    vieneuMsg.classList.add('hidden');
+    try {
+      const status = await invoke('remove_vieneu_model_cmd', { modelName: rmId });
+      if (activeVieneuModel === rmId && status.downloadedModels?.length) {
+        activeVieneuModel = status.downloadedModels[0];
+        persistSettings();
+      }
+      renderVieneuUI(status);
+    } catch (err) {
+      vieneuMsg.textContent = String(err);
+      vieneuMsg.classList.remove('hidden');
+    }
   }
 });
 

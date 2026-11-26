@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.27] - 2026-11-26
+
+### Added & Fixed
+- **Offline VieNeu-TTS Integration (Installable Package & Model Variants):** Added 1-click `uv + vieneu` runtime installer, selectable `v3turbo` (48kHz) / `v3nano` (24kHz) model downloads, 25 Vietnamese regional preset voices + custom voice cloning, auto-managed local sidecar (`127.0.0.1:4874`), and Extension Dubbing voice selector.
+- **Live Edge TTS Priority & Multi-Language macOS Fallback:** Live `/tts` requests now take priority over background `/tts/prepare` (plus `4`-slot semaphore and `8s` timeout / `3` retries), fixed `prefetchNextCues` skipping fast cues, and mapped macOS `say` offline fallback voices by target language (`vi`, `en`, `ja`, `ko`, `zh`, `fr`, `de`, `es`, `it`, `pt`, `ru`, `th`, `id`).
+
 ## [1.2.26] - 2026-11-26
 
 ### Fixed & Improved

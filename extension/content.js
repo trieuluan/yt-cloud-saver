@@ -844,26 +844,23 @@
     }
   }
 
-  let prefetchInFlight = false;
+  let lastPrefetchedIdx = -1;
   async function prefetchNextCues(idx) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-    if (voice === 'browser' || !subBundle?.cues?.length || prefetchInFlight) return;
+    if (voice === 'browser' || !subBundle?.cues?.length) return;
+    if (idx === lastPrefetchedIdx) return;
+    lastPrefetchedIdx = idx;
     pruneRamCacheWindow(idx, voice, '+15%');
     prepareBatchAhead(idx + 1, 12);
-    prefetchInFlight = true;
-    try {
-      const tasks = [];
-      for (let offset = 1; offset <= 3; offset += 1) {
-        const nextCue = subBundle.cues[idx + offset];
-        const nextText = nextCue?.translated?.trim();
-        if (hasSpeakableText(nextText)) {
-          tasks.push(fetchEdgeTtsAudio(nextText, voice, '+15%').catch(() => {}));
-        }
+    const tasks = [];
+    for (let offset = 1; offset <= 4; offset += 1) {
+      const nextCue = subBundle.cues[idx + offset];
+      const nextText = nextCue?.translated?.trim();
+      if (hasSpeakableText(nextText)) {
+        tasks.push(fetchEdgeTtsAudio(nextText, voice, '+15%').catch(() => {}));
       }
-      if (tasks.length) await Promise.all(tasks);
-    } finally {
-      prefetchInFlight = false;
     }
+    if (tasks.length) await Promise.all(tasks);
   }
 
   function duckVideoVolume(video) {
@@ -1124,6 +1121,7 @@
         const curIdx = Math.max(0, subBundle?.cues?.findIndex((c) => c.endMs >= nowMs) ?? 0);
         preparedFromIdx = -1;
         preparedUpToIdx = -1;
+        lastPrefetchedIdx = -1;
         const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
         if (voice !== 'browser' && dubBtnEl) {
           if (wasPlaying) video.pause();

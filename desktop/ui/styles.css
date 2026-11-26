@@ -899,3 +899,41 @@ select:focus {
   background: rgba(168, 85, 247, 0.25);
   color: #f3e8ff;
 }
+
+.variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variant-item {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.variant-item.active-model {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.07);
+}
+
+.variant-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  margin-left: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9aa3b2;
+}
+
+.variant-tag.rec {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+}

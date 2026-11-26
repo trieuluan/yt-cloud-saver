@@ -301,6 +301,98 @@
           <p id="whisperMsg" class="error-text hidden"></p>
         </div>
 
+        <div class="card ai-card">
+          <div class="sub-box" style="background:transparent;border:0;padding:0;">
+            <div>
+              <div class="sub-title">AI Voice Dubbing (TTS)</div>
+              <div class="preview-text" style="margin-top:2px;">Chọn Engine lồng tiếng cho YouTube Extension.</div>
+            </div>
+            <span id="vieneuSidecarBadge" class="muted">Sidecar: Off</span>
+          </div>
+
+          <div class="seg-tabs">
+            <button id="ttsModeEdgeBtn" class="seg-btn active" type="button">☁️ Edge TTS (Online)</button>
+            <button id="ttsModeLocalBtn" class="seg-btn" type="button">🖥 Local Offline (VieNeu-TTS)</button>
+          </div>
+
+          <div id="ttsEdgePanel" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="sub-box-col">
+              <div class="sub-title">Microsoft Edge TTS (Online)</div>
+              <div class="preview-text" style="margin-top:2px;">
+                Không cần tải thêm model (~0 MB), hỗ trợ đa ngôn ngữ. Tự động fallback sang giọng hệ thống macOS (theo ngôn ngữ) nếu Microsoft bóp kết nối.
+              </div>
+            </div>
+          </div>
+
+          <div id="ttsLocalPanel" class="hidden" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="sub-box">
+              <div>
+                <div class="sub-title">VieNeu-TTS Runtime (uv + vieneu)</div>
+                <div id="vieneuRuntimeStatus" class="muted">Checking...</div>
+              </div>
+              <div class="btn-group">
+                <button id="vieneuInstallBtn" class="btn-primary btn-xs" type="button">Install</button>
+                <button id="vieneuRemoveBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+              </div>
+            </div>
+
+            <div class="sub-box-col">
+              <div>
+                <div class="sub-title">Model Variants (tải tuỳ ý &amp; chuyển đổi nhanh)</div>
+                <div class="muted" style="font-size:11px;">Chọn model phù hợp phần cứng Mac của bạn</div>
+              </div>
+              <div id="vieneuVariantList" class="variant-list"></div>
+            </div>
+
+            <div class="sub-box-col">
+              <div class="quality-row">
+                <span class="sub-title" style="white-space:nowrap;flex-shrink:0;">Default VieNeu Voice</span>
+                <div style="display:flex;gap:6px;align-items:center;flex:1;min-width:0;justify-content:flex-end;">
+                  <select id="vieneuVoiceSelect" style="min-width:0;flex:1;max-width:220px;">
+                    <optgroup label="Giọng có sẵn (Preset)">
+                      <option value="Ngọc Huyền">Ngọc Huyền · Nữ Bắc (Tự nhiên)</option>
+                      <option value="Trúc Ly">Trúc Ly · Nữ Bắc (Tự nhiên)</option>
+                      <option value="Mai Anh">Mai Anh · Nữ Bắc (Tin tức)</option>
+                      <option value="Đoan Trang">Đoan Trang · Nữ Bắc (Tự nhiên)</option>
+                      <option value="Thùy Dung">Thùy Dung · Nữ Nam (Tin tức)</option>
+                      <option value="Mỹ Duyên">Mỹ Duyên · Nữ Nam (Đọc truyện)</option>
+                      <option value="Ngọc Trân">Ngọc Trân · Nữ Trung (Tự nhiên)</option>
+                      <option value="Hải Đăng">Hải Đăng · Nam Bắc (Tự nhiên)</option>
+                      <option value="Thiện Minh">Thiện Minh · Nam Bắc (Kể chuyện)</option>
+                      <option value="Adam bựa">Adam bựa · Nam Bắc (Tự nhiên)</option>
+                      <option value="Quang Sơn">Quang Sơn · Nam Trung (Tự nhiên)</option>
+                      <option value="Thái Sơn">Thái Sơn · Nam Nam (Kể chuyện)</option>
+                    </optgroup>
+                    <optgroup id="vieneuCustomOptGroup" label="🎙 Custom Voices"></optgroup>
+                    <option value="__add_custom__">➕ Add Custom Voice...</option>
+                  </select>
+                  <button id="vieneuTestVoiceBtn" class="btn-ghost btn-xs" style="white-space:nowrap;flex-shrink:0;" type="button" title="Nghe thử giọng đang chọn">▶ Test</button>
+                  <button id="vieneuDelVoiceBtn" class="btn-danger-ghost btn-xs hidden" style="white-space:nowrap;flex-shrink:0;" type="button" title="Xoá custom voice đang chọn">Delete</button>
+                </div>
+              </div>
+              <div id="vieneuRefAudioRow" class="hidden" style="display:flex;flex-direction:column;gap:8px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
+                <label class="field" style="margin-bottom:0">
+                  <span>Custom Voice Name</span>
+                  <input id="vieneuCustomNameInput" type="text" placeholder="VD: Giọng Review Nam" />
+                </label>
+                <label class="field" style="margin-bottom:0">
+                  <span>Reference Audio Path (.wav / .mp3, 3–8s · kéo thả file vào đây)</span>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="vieneuRefAudioInput" type="text" placeholder="Kéo thả file .wav/.mp3 vào đây hoặc bấm Browse..." style="flex:1;min-width:0;" />
+                    <button id="vieneuBrowseAudioBtn" class="btn-ghost btn-xs" type="button" style="white-space:nowrap;flex-shrink:0;">Browse</button>
+                  </div>
+                </label>
+                <div style="display:flex;gap:6px;justify-content:flex-end;">
+                  <button id="vieneuCancelCustomBtn" class="btn-ghost btn-xs" type="button">Cancel</button>
+                  <button id="vieneuSaveCustomBtn" class="btn-primary btn-xs" type="button">Save Voice</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p id="vieneuMsg" class="error-text hidden"></p>
+        </div>
+
         <div class="card">
           <label class="toggle-row">
             <span>Embed translated subtitles (.srt) into saved MP4</span>

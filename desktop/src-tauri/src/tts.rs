@@ -3,6 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 use tokio::process::Command;
@@ -375,6 +376,7 @@ async fn synthesize_edge_tts_once(
         .map_err(|e| format!("Edge TTS SSML send failed: {e}"))?;
 
     let mut audio_bytes: Vec<u8> = Vec::new();
+    let mut saw_turn_end = false;
     while let Some(frame) = ws.next().await {
         match frame {
             Ok(Message::Binary(data)) => {
@@ -388,6 +390,7 @@ async fn synthesize_edge_tts_once(
             }
             Ok(Message::Text(txt)) => {
                 if txt.contains("Path:turn.end") {
+                    saw_turn_end = true;
                     break;
                 }
             }
@@ -398,16 +401,24 @@ async fn synthesize_edge_tts_once(
     }
     let _ = ws.close(None).await;
 
-    if audio_bytes.is_empty() {
-        return Err("Edge TTS returned empty audio".to_string());
+    if !saw_turn_end || audio_bytes.is_empty() {
+        return Err("Edge TTS stream ended without complete audio".to_string());
     }
     Ok(audio_bytes)
 }
 
 static EDGE_TTS_SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static ACTIVE_LIVE_TTS: AtomicUsize = AtomicUsize::new(0);
+
+struct LiveTtsGuard;
+impl Drop for LiveTtsGuard {
+    fn drop(&mut self) {
+        ACTIVE_LIVE_TTS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 fn edge_tts_sem() -> Arc<Semaphore> {
-    EDGE_TTS_SEM.get_or_init(|| Arc::new(Semaphore::new(2))).clone()
+    EDGE_TTS_SEM.get_or_init(|| Arc::new(Semaphore::new(4))).clone()
 }
 
 pub async fn synthesize_edge_tts(
@@ -445,9 +456,9 @@ pub async fn synthesize_edge_tts(
     }
 
     let mut last_err = String::new();
-    for attempt in 0..2 {
+    for attempt in 0..3 {
         match tokio::time::timeout(
-            Duration::from_secs(6),
+            Duration::from_secs(8),
             synthesize_edge_tts_once(clean_text, &voice_name, &rate_str),
         )
         .await
@@ -460,11 +471,47 @@ pub async fn synthesize_edge_tts(
             Ok(Err(e)) => last_err = e,
             Err(_) => last_err = "Edge TTS request timed out".to_string(),
         }
-        if attempt == 0 {
+        if attempt < 2 {
             tokio::time::sleep(Duration::from_millis(120)).await;
         }
     }
     Err(last_err)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_voice_for_edge_voice(voice_name: &str) -> &'static str {
+    let lower = voice_name.to_ascii_lowercase();
+    if lower.starts_with("vi-") {
+        "Linh"
+    } else if lower.starts_with("en-") {
+        "Samantha"
+    } else if lower.starts_with("ja-") {
+        "Kyoko"
+    } else if lower.starts_with("ko-") {
+        "Yuna"
+    } else if lower.starts_with("zh-tw") || lower.starts_with("zh-hk") {
+        "Meijia"
+    } else if lower.starts_with("zh-") {
+        "Tingting"
+    } else if lower.starts_with("fr-") {
+        "Thomas"
+    } else if lower.starts_with("de-") {
+        "Anna"
+    } else if lower.starts_with("es-") {
+        "Mónica"
+    } else if lower.starts_with("it-") {
+        "Alice"
+    } else if lower.starts_with("pt-") {
+        "Luciana"
+    } else if lower.starts_with("ru-") {
+        "Milena"
+    } else if lower.starts_with("th-") {
+        "Kanya"
+    } else if lower.starts_with("id-") {
+        "Damayanti"
+    } else {
+        "Samantha"
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -475,17 +522,13 @@ async fn synthesize_macos_say_mp3(
 ) -> Result<Vec<u8>, String> {
     let ffmpeg = crate::tools::find_binary("ffmpeg", bin_dir)
         .ok_or_else(|| "ffmpeg not found for macOS say fallback".to_string())?;
-    let mac_voice = if voice_name.starts_with("vi-") {
-        "Linh"
-    } else {
-        "Samantha"
-    };
+    let mac_voice = macos_voice_for_edge_voice(voice_name);
     let id = Uuid::new_v4().simple().to_string();
     let tmp_dir = std::env::temp_dir();
     let aiff_path = tmp_dir.join(format!("ytcs_say_{id}.aiff"));
     let mp3_path = tmp_dir.join(format!("ytcs_say_{id}.mp3"));
 
-    let say_ok = Command::new("say")
+    let mut say_ok = Command::new("say")
         .args(["-v", mac_voice, "-o"])
         .arg(&aiff_path)
         .arg("--")
@@ -494,6 +537,19 @@ async fn synthesize_macos_say_mp3(
         .await
         .map(|o| o.status.success())
         .unwrap_or(false);
+
+    if !say_ok || !aiff_path.is_file() {
+        let _ = fs::remove_file(&aiff_path);
+        say_ok = Command::new("say")
+            .arg("-o")
+            .arg(&aiff_path)
+            .arg("--")
+            .arg(text)
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    }
 
     if !say_ok || !aiff_path.is_file() {
         let _ = fs::remove_file(&aiff_path);
@@ -535,6 +591,8 @@ pub async fn synthesize_edge_tts_with_fallback(
     voice: Option<&str>,
     rate: Option<&str>,
 ) -> Result<Vec<u8>, String> {
+    ACTIVE_LIVE_TTS.fetch_add(1, Ordering::AcqRel);
+    let _live_guard = LiveTtsGuard;
     match synthesize_edge_tts(data_dir, text, voice, rate).await {
         Ok(bytes) => Ok(bytes),
         Err(edge_err) => {
@@ -569,6 +627,13 @@ pub async fn prepare_edge_tts_batch(
             let Ok(_guard) = permit.acquire().await else {
                 return false;
             };
+            // Yield to live /tts requests so current playback never starves behind background prepare
+            for _ in 0..20 {
+                if ACTIVE_LIVE_TTS.load(Ordering::Acquire) == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
             synthesize_edge_tts(&dir, &trimmed, v.as_deref(), r.as_deref())
                 .await
                 .is_ok()
@@ -631,16 +696,25 @@ mod tests {
     #[tokio::test]
     async fn test_edge_tts_live() {
         let tmp = std::env::temp_dir().join("yt_cloud_saver_tts_test");
-        let bytes = synthesize_edge_tts(
-            &tmp,
+        let _ = fs::remove_dir_all(&tmp);
+        let sentences = [
             "Xin chào, đây là giọng đọc Hoài Mỹ.",
-            Some("vi-VN-HoaiMyNeural"),
-            Some("+15%"),
-        )
-        .await
-        .expect("Edge TTS should synthesize MP3");
-        println!("Synthesized {} bytes", bytes.len());
-        assert!(bytes.len() > 1000);
+            "Câu thứ hai kiểm tra tái sử dụng kết nối WebSocket.",
+            "Câu thứ ba vẫn phải ra âm thanh đầy đủ.",
+        ];
+        for (idx, s) in sentences.iter().enumerate() {
+            let t0 = std::time::Instant::now();
+            let bytes = synthesize_edge_tts(
+                &tmp,
+                s,
+                Some("vi-VN-HoaiMyNeural"),
+                Some("+15%"),
+            )
+            .await
+            .expect("Edge TTS should synthesize MP3");
+            println!("Sentence {} synthesized {} bytes in {:?}", idx + 1, bytes.len(), t0.elapsed());
+            assert!(bytes.len() > 1000);
+        }
         let _ = fs::remove_dir_all(&tmp);
     }
 }

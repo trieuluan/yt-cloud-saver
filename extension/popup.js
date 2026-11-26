@@ -123,10 +123,33 @@ async function saveSubStyle() {
   await chrome.storage.local.set({ subStyle });
 }
 
+async function loadCustomVieneuVoices() {
+  const group = document.getElementById('dubVieneuGroup');
+  if (!group) return;
+  try {
+    const resp = await fetch('http://127.0.0.1:4873/vieneu/status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    group.querySelectorAll('[data-custom-voice]').forEach((el) => el.remove());
+    const customs = Array.isArray(data.customVoices) ? data.customVoices : [];
+    for (const v of customs) {
+      const opt = document.createElement('option');
+      opt.value = `vieneu:custom:${v.id}`;
+      opt.textContent = `VieNeu · 🎙 ${v.name}`;
+      opt.dataset.customVoice = '1';
+      group.appendChild(opt);
+    }
+    dubVoiceSelect.value = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+  } catch {
+    // Desktop offline
+  }
+}
+
 async function loadSubStyle() {
   const res = await chrome.storage.local.get({ subStyle: DEFAULT_SUB_STYLE });
   subStyle = { ...DEFAULT_SUB_STYLE, ...(res.subStyle || {}) };
   renderSubStyle();
+  loadCustomVieneuVoices();
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
