@@ -93,8 +93,8 @@ const IntroScene: React.FC = () => {
         <h1 style={{ fontSize: 64, fontWeight: 800, margin: '0 0 12px', letterSpacing: '-0.03em' }}>
           YT Cloud Saver
         </h1>
-        <p style={{ fontSize: 25, color: '#94a3b8', margin: 0, opacity: textOp }}>
-          Setup &amp; Usage Guide (3 Simple Steps)
+        <p style={{ fontSize: 24, color: '#94a3b8', margin: 0, opacity: textOp }}>
+          Save to Drive · AI Subtitles · Edge Neural TTS Dubbing
         </p>
       </div>
     </SceneWrap>
@@ -352,7 +352,7 @@ const Step3SaveYouTubeScene: React.FC = () => {
       ? `Downloading ${pct}%`
       : phase === 'uploading'
         ? `Uploading ${pct}%`
-        : 'Saved ✓';
+        : 'Saved ✓ ▾';
 
   return (
     <SceneWrap duration={160}>
@@ -413,54 +413,189 @@ const Step3SaveYouTubeScene: React.FC = () => {
   );
 };
 
-const Step4FallbackScene: React.FC = () => {
+const Step4AiSubtitlesAndDubScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const switched = frame >= 46;
-  const playWidth = interpolate(frame, [52, 130], [8, 65], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  // 0..55: move to AI CC -> click -> Translating -> Bilingual
+  // 55..115: move to Dub -> click -> Buffering -> Dub: ON
+  // 115..210: show Extension Popup customizing size & voice
+  const ccClicked = frame >= 36 && frame <= 46;
+  const ccState = frame < 40 ? 'off' : frame < 60 ? 'translating' : 'bilingual';
+
+  const dubClicked = frame >= 92 && frame <= 102;
+  const dubState = frame < 96 ? 'off' : frame < 114 ? 'buffering' : 'on';
+
+  const showPopup = frame >= 122;
+  const popupOp = interpolate(frame, [122, 134], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const sizeBoost = frame >= 165;
+
+  const cursorX = frame < 55
+    ? interpolate(frame, [8, 34], [520, 742], { extrapolateRight: 'clamp' })
+    : frame < 120
+      ? interpolate(frame, [58, 90], [742, 855], { extrapolateRight: 'clamp' })
+      : interpolate(frame, [130, 162], [855, 1020], { extrapolateRight: 'clamp' });
+  const cursorY = frame < 55
+    ? interpolate(frame, [8, 34], [210, 354], { extrapolateRight: 'clamp' })
+    : frame < 120
+      ? interpolate(frame, [58, 90], [354, 354], { extrapolateRight: 'clamp' })
+      : interpolate(frame, [130, 162], [354, 240], { extrapolateRight: 'clamp' });
 
   return (
-    <SceneWrap duration={135}>
-      <div style={{ width: '100%', textAlign: 'center' }}>
-        <div style={{ color: '#60a5fa', fontSize: 15, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          Protected Against Removal
+    <SceneWrap duration={210}>
+      <div style={{ width: 1080 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ color: '#c084fc', fontSize: 15, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Step 4 · AI Subtitles (Whisper) &amp; Edge Neural TTS Dubbing
+          </span>
+          <span style={{ fontSize: 13, color: '#94a3b8' }}>Shortcuts: Option/Alt + C · Option/Alt + D</span>
         </div>
-        <h2 style={{ fontSize: 40, fontWeight: 800, margin: '0 0 22px' }}>
-          Auto-plays from Google Drive if YouTube removes it
-        </h2>
 
-        <div
-          style={{
-            width: 820,
-            height: 340,
-            margin: '0 auto',
-            borderRadius: 18,
-            overflow: 'hidden',
-            border: '1px solid #27272a',
-            background: switched ? 'linear-gradient(135deg, #0f172a, #1e1b4b)' : '#09090b',
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {!switched ? (
-            <>
-              <div style={{ fontSize: 38, marginBottom: 10 }}>⚠️</div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>Video unavailable</div>
-              <div style={{ fontSize: 14, color: '#71717a', marginTop: 6 }}>This video is no longer available due to a copyright claim.</div>
-            </>
-          ) : (
-            <>
-              <div style={{ position: 'absolute', top: 14, right: 14, background: 'rgba(15,17,21,0.85)', border: '1px solid rgba(74,222,128,0.45)', color: '#4ade80', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                Playing saved copy from Google Drive
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#e2e8f0' }}>Streaming straight from Google Drive</div>
-              <div style={{ position: 'absolute', left: 20, right: 20, bottom: 18, height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.2)' }}>
-                <div style={{ width: `${playWidth}%`, height: '100%', borderRadius: 999, background: '#4ade80' }} />
-              </div>
-            </>
+        <div style={{ position: 'relative', height: 430, borderRadius: 18, overflow: 'hidden', border: '1px solid #27272a', background: 'linear-gradient(135deg, #1e293b 0%, #090b10 65%, #3b0764)', boxShadow: '0 24px 60px rgba(0,0,0,0.75)' }}>
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'rgba(255,255,255,0.22)', fontWeight: 700 }}>
+            YOUTUBE PLAYER · AI CC &amp; EDGE TTS DUBBING
+          </div>
+
+          {dubState === 'on' && (
+            <div style={{ position: 'absolute', top: 18, left: 18, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderRadius: 999, background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(52,211,153,0.45)', color: '#a7f3d0', fontSize: 13, fontWeight: 600 }}>
+              <span>🔊 Hoài Mỹ · Edge Neural TTS (Synced to cue)</span>
+            </div>
           )}
+
+          {ccState === 'bilingual' && (
+            <div style={{ position: 'absolute', left: '8%', right: '8%', bottom: 72, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, textAlign: 'center' }}>
+              <div style={{ background: 'rgba(0,0,0,0.68)', color: '#e2e8f0', padding: '4px 12px', borderRadius: 6, fontSize: 14 }}>
+                After saving a cold beauty in the storm, she trusted no one.
+              </div>
+              <div style={{ background: 'rgba(0,0,0,0.84)', color: '#ffffff', padding: '6px 14px', borderRadius: 8, fontSize: sizeBoost ? 22 : 18, fontWeight: 600 }}>
+                Sau khi cứu mỹ nhân lạnh lùng trong cơn bão, cô ấy không tin ai nữa.
+              </div>
+            </div>
+          )}
+
+          {/* YouTube Bottom Control Bar */}
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '18px 16px 12px', background: 'linear-gradient(transparent, rgba(0,0,0,0.88))' }}>
+            <div style={{ height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.22)', marginBottom: 10 }}>
+              <div style={{ width: '38%', height: '100%', background: '#ff0033', borderRadius: 99 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '5px 12px', borderRadius: 999, background: 'rgba(255,255,255,0.14)', fontSize: 12 }}>▶ &nbsp; 12:34 / 45:10</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, background: 'rgba(18,22,30,0.82)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                  <div style={{ height: 26, padding: '0 10px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', fontSize: 12, fontWeight: 600, background: ccState === 'bilingual' ? 'rgba(168,85,247,0.36)' : ccState === 'translating' ? 'rgba(59,130,246,0.36)' : 'transparent', color: ccState === 'bilingual' ? '#f3e8ff' : '#e2e8f0' }}>
+                    {ccState === 'off' ? '● AI CC: OFF' : ccState === 'translating' ? '● Translating...' : '● AI CC: Bilingual'}
+                  </div>
+                  <div style={{ height: 26, padding: '0 10px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', fontSize: 12, fontWeight: 600, background: dubState === 'on' ? 'rgba(34,197,94,0.34)' : dubState === 'buffering' ? 'rgba(59,130,246,0.34)' : 'transparent', color: dubState === 'on' ? '#dcfce7' : '#e2e8f0' }}>
+                    {dubState === 'off' ? '● Dub: OFF' : dubState === 'buffering' ? '● Dub: Buffering...' : '● Dub: ON'}
+                  </div>
+                </div>
+                <div style={{ padding: '5px 12px', borderRadius: 999, background: 'rgba(255,255,255,0.14)', fontSize: 12 }}>↻ &nbsp; CC &nbsp; ⚙ &nbsp; ⛶</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Extension Popup Customizer */}
+          {showPopup && (
+            <div style={{ position: 'absolute', top: 18, right: 18, width: 320, background: '#0f1115', border: '1px solid #2b3242', borderRadius: 12, padding: 12, opacity: popupOp, boxShadow: '0 18px 40px rgba(0,0,0,0.8)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+                <span>Subtitles &amp; Dub</span>
+                <span style={{ color: '#4ade80', fontSize: 11 }}>Server Online</span>
+              </div>
+              <div style={{ background: '#171a21', borderRadius: 8, padding: 9, fontSize: 12, marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <span style={{ color: '#9aa3b2' }}>Subtitle Size</span>
+                  <span style={{ color: '#60a5fa', fontWeight: 700 }}>{sizeBoost ? '22px' : '18px'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <span style={{ color: '#9aa3b2' }}>Voice</span>
+                  <span style={{ color: '#4ade80', fontWeight: 600 }}>Hoài Mỹ (Edge AI)</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#9aa3b2' }}>Original Volume</span>
+                  <span style={{ color: '#60a5fa', fontWeight: 600 }}>15%</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Cursor x={cursorX} y={cursorY} clicking={ccClicked || dubClicked} />
+        </div>
+      </div>
+    </SceneWrap>
+  );
+};
+
+const Step5CloudPlayerAndBackupScene: React.FC = () => {
+  const frame = useCurrentFrame();
+  const switched = frame >= 45;
+  const playWidth = interpolate(frame, [52, 180], [10, 74], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+
+  return (
+    <SceneWrap duration={190}>
+      <div style={{ width: '100%', display: 'flex', gap: 28, alignItems: 'center' }}>
+        <div style={{ flex: 1.25 }}>
+          <div style={{ color: '#60a5fa', fontSize: 14, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+            Step 5 · Inline Cloud Player &amp; Drive Backup
+          </div>
+          <h2 style={{ fontSize: 32, fontWeight: 800, margin: '0 0 16px' }}>
+            Stream from Drive + Export / Re-translate
+          </h2>
+
+          <div
+            style={{
+              height: 290,
+              borderRadius: 16,
+              overflow: 'hidden',
+              border: '1px solid #27272a',
+              background: switched ? 'linear-gradient(135deg, #0f172a, #1e1b4b)' : '#09090b',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {!switched ? (
+              <>
+                <div style={{ fontSize: 34, marginBottom: 8 }}>⚠️</div>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>Video unavailable on YouTube</div>
+              </>
+            ) : (
+              <>
+                <div style={{ position: 'absolute', top: 12, left: 12, background: 'rgba(15,17,21,0.85)', border: '1px solid rgba(74,222,128,0.45)', color: '#4ade80', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 600 }}>
+                  Playing saved copy from Google Drive (rclone serve)
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#e2e8f0' }}>Fast Range Streaming + AI CC + Dub</div>
+                <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16, height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.2)' }}>
+                  <div style={{ width: `${playWidth}%`, height: '100%', borderRadius: 999, background: '#ff0033' }} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop Sub Card + Backup */}
+        <div style={{ flex: 0.9, background: '#111318', border: '1px solid #2a303e', borderRadius: 14, padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <strong style={{ fontSize: 15 }}>Desktop App · v1.2.9</strong>
+            <span style={{ color: '#4ade80', fontSize: 11.5, fontWeight: 600 }}>Auto-Updater ✓</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <span style={{ padding: '5px 9px', borderRadius: 6, border: '1px solid #2b3140', fontSize: 11, color: '#cbd5e1' }}>↑ Backup Subs</span>
+            <span style={{ padding: '5px 9px', borderRadius: 6, border: '1px solid #2b3140', fontSize: 11, color: '#cbd5e1' }}>↓ Restore Subs</span>
+            <span style={{ padding: '5px 9px', borderRadius: 6, border: '1px solid #2b3140', fontSize: 11, color: '#cbd5e1' }}>↻ Sync Drive</span>
+          </div>
+          <div style={{ background: '#171a21', border: '1px solid #242934', borderRadius: 10, padding: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+              <span style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: 4, fontSize: 10.5, marginRight: 6 }}>Sub ✓</span>
+              The Last Horizon — AI Film
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#9aa3b2' }}>Vietnamese · whisper</span>
+              <div style={{ display: 'flex', gap: 5 }}>
+                <span style={{ padding: '3px 7px', borderRadius: 5, background: 'rgba(168,85,247,0.18)', color: '#d8b4fe', fontSize: 10.5 }}>↻ Re-translate</span>
+                <span style={{ padding: '3px 7px', borderRadius: 5, border: '1px solid #2b3140', color: '#cbd5e1', fontSize: 10.5 }}>Export .srt ▾</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </SceneWrap>
@@ -470,21 +605,24 @@ const Step4FallbackScene: React.FC = () => {
 export const Tutorial: React.FC = () => {
   return (
     <AbsoluteFill>
-      <Audio src={staticFile('bgm.wav')} volume={0.6} />
+      <Audio src={staticFile('bgm.wav')} volume={0.55} loop />
       <Sequence from={0} durationInFrames={90}>
         <IntroScene />
       </Sequence>
-      <Sequence from={90} durationInFrames={185}>
+      <Sequence from={90} durationInFrames={160}>
         <Step1DesktopScene />
       </Sequence>
-      <Sequence from={275} durationInFrames={180}>
+      <Sequence from={250} durationInFrames={150}>
         <Step2ExtensionScene />
       </Sequence>
-      <Sequence from={455} durationInFrames={160}>
+      <Sequence from={400} durationInFrames={160}>
         <Step3SaveYouTubeScene />
       </Sequence>
-      <Sequence from={615} durationInFrames={135}>
-        <Step4FallbackScene />
+      <Sequence from={560} durationInFrames={210}>
+        <Step4AiSubtitlesAndDubScene />
+      </Sequence>
+      <Sequence from={770} durationInFrames={190}>
+        <Step5CloudPlayerAndBackupScene />
       </Sequence>
     </AbsoluteFill>
   );
