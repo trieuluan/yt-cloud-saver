@@ -45,6 +45,7 @@ jobs:
           mkdir -p dist
           (cd extension && zip -r ../dist/yt-cloud-saver-extension.zip .)
           gh release upload "${{ github.ref_name }}" dist/yt-cloud-saver-extension.zip --clobber
+          gh release edit "${{ github.ref_name }}" --draft=false
 
   build-desktop:
     needs: prepare-release
