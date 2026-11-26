@@ -266,12 +266,16 @@ impl SpeakerCluster {
 
 pub struct SpeakerTracker {
     clusters: Vec<SpeakerCluster>,
+    wespeaker_session: Option<Session>,
+    yamnet_session: Option<Session>,
 }
 
 impl SpeakerTracker {
     pub fn new() -> Self {
         Self {
             clusters: Vec::new(),
+            wespeaker_session: None,
+            yamnet_session: None,
         }
     }
 
@@ -283,13 +287,14 @@ impl SpeakerTracker {
         }
     }
 
-    /// Assigns `(prompt_hint, speaker_code)` for each cue in a chunk WAV.
-    pub fn diarize_chunk(
+    /// Assigns `(prompt_hint, speaker_code)` using precomputed YAMNet scores when available.
+    pub fn diarize_chunk_with_yamnet(
         &mut self,
         data_dir: &Path,
         wav_path: &Path,
         offset_ms: u64,
         cues: &[SubtitleCue],
+        precomputed_yamnet: Option<&[crate::yamnet::YamnetFrameScore]>,
     ) -> Result<Vec<(String, Option<String>)>, String> {
         let model_path = wespeaker_model_path(data_dir);
         if !model_path.is_file() || cues.is_empty() {
@@ -311,14 +316,33 @@ impl SpeakerTracker {
             return Ok(vec![(String::new(), None); cues.len()]);
         }
 
-        let yamnet_frames = crate::yamnet::analyze_pcm_gender_frames(data_dir, &pcm_f32)
-            .unwrap_or_default();
+        let owned_yamnet;
+        let yamnet_frames: &[crate::yamnet::YamnetFrameScore] = if let Some(frames) = precomputed_yamnet {
+            frames
+        } else {
+            if self.yamnet_session.is_none() && crate::yamnet::yamnet_model_path(data_dir).is_file() {
+                self.yamnet_session = crate::yamnet::load_yamnet_session(data_dir).ok();
+            }
+            owned_yamnet = match self.yamnet_session.as_mut() {
+                Some(ys) => crate::yamnet::analyze_pcm_gender_frames_with_session(ys, &pcm_f32)
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            };
+            &owned_yamnet
+        };
 
-        let env = crate::yamnet::shared_ort_env()?;
-        let mut session = Session::builder(env)
-            .map_err(|e| format!("ORT session builder error: {e}"))?
-            .commit_from_file(&model_path)
-            .map_err(|e| format!("Failed to load wespeaker_voxceleb.onnx: {e}"))?;
+        if self.wespeaker_session.is_none() {
+            let env = crate::yamnet::shared_ort_env()?;
+            let s = Session::builder(env)
+                .map_err(|e| format!("ORT session builder error: {e}"))?
+                .commit_from_file(&model_path)
+                .map_err(|e| format!("Failed to load wespeaker_voxceleb.onnx: {e}"))?;
+            self.wespeaker_session = Some(s);
+        }
+        let session = self
+            .wespeaker_session
+            .as_mut()
+            .ok_or_else(|| "WeSpeaker session unavailable".to_string())?;
 
         let mut assigned_cluster: Vec<Option<usize>> = vec![None; cues.len()];
 
@@ -510,11 +534,21 @@ mod tests {
             }
             w.finalize().unwrap();
         }
-        if crate::yamnet::yamnet_model_path(&data_dir).is_file() {
-            let muted = crate::yamnet::filter_music_and_singing_wav(&data_dir, &wav_path, "balanced")
-                .expect("yamnet filter");
-            println!("YAMNet muted frames: {muted}");
-        }
+        let mut yamnet_cached = None;
+        let precomputed_yamnet = if crate::yamnet::yamnet_model_path(&data_dir).is_file() {
+            let (muted, scores) = crate::yamnet::filter_music_and_singing_wav_with_scores(
+                &data_dir,
+                &wav_path,
+                "balanced",
+                &mut yamnet_cached,
+            )
+            .expect("yamnet filter");
+            println!("YAMNet muted frames: {muted}, gender frames: {}", scores.len());
+            assert!(!scores.is_empty());
+            Some(scores)
+        } else {
+            None
+        };
         let cues = vec![
             SubtitleCue {
                 start_ms: 0,
@@ -531,12 +565,32 @@ mod tests {
                 speaker: None,
             },
         ];
+        let cues_2 = vec![
+            SubtitleCue {
+                start_ms: 5000,
+                end_ms: 5360,
+                original: "short".into(),
+                translated: String::new(),
+                speaker: None,
+            },
+            SubtitleCue {
+                start_ms: 6600,
+                end_ms: 9500,
+                original: "world".into(),
+                translated: String::new(),
+                speaker: None,
+            },
+        ];
         let mut tracker = SpeakerTracker::new();
-        let pairs = tracker
-            .diarize_chunk(&data_dir, &wav_path, 0, &cues)
-            .expect("diarize_chunk");
+        let pairs_1 = tracker
+            .diarize_chunk_with_yamnet(&data_dir, &wav_path, 0, &cues, precomputed_yamnet.as_deref())
+            .expect("diarize_chunk 1");
+        let pairs_2 = tracker
+            .diarize_chunk_with_yamnet(&data_dir, &wav_path, 5000, &cues_2, precomputed_yamnet.as_deref())
+            .expect("diarize_chunk 2 (cached session)");
         let _ = fs::remove_file(&wav_path);
-        println!("diarize_chunk pairs: {:?}", pairs);
-        assert!(pairs.iter().any(|(_, code)| code.is_some()));
+        println!("diarize_chunk pairs_1: {:?}, pairs_2: {:?}", pairs_1, pairs_2);
+        assert!(pairs_1.iter().any(|(_, code)| code.is_some()));
+        assert!(pairs_2.iter().any(|(_, code)| code.is_some()));
     }
 }

@@ -67,19 +67,25 @@ pub struct YamnetFrameScore {
     pub female: f32,
 }
 
-pub fn analyze_pcm_gender_frames(
-    data_dir: &Path,
-    samples_f32: &[f32],
-) -> Result<Vec<YamnetFrameScore>, String> {
+pub fn load_yamnet_session(data_dir: &Path) -> Result<Session, String> {
     let model_path = yamnet_model_path(data_dir);
-    if !model_path.is_file() || samples_f32.len() < 16_000 {
-        return Ok(Vec::new());
+    if !model_path.is_file() {
+        return Err("yamnet.onnx is not installed".to_string());
     }
     let env = shared_ort_env()?;
-    let mut session = Session::builder(env)
+    Session::builder(env)
         .map_err(|e| format!("ORT session builder error: {e}"))?
         .commit_from_file(&model_path)
-        .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))?;
+        .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))
+}
+
+pub fn analyze_pcm_gender_frames_with_session(
+    session: &mut Session,
+    samples_f32: &[f32],
+) -> Result<Vec<YamnetFrameScore>, String> {
+    if samples_f32.len() < 16_000 {
+        return Ok(Vec::new());
+    }
     let n_samples = samples_f32.len();
     let input_tensor = Tensor::from_array(([n_samples], samples_f32.to_vec().into_boxed_slice()))
         .map_err(|e| format!("Failed to create input tensor: {e}"))?;
@@ -105,16 +111,12 @@ pub fn analyze_pcm_gender_frames(
     Ok(out)
 }
 
-pub fn filter_music_and_singing_wav(
+pub fn filter_music_and_singing_wav_with_scores(
     data_dir: &Path,
     wav_path: &Path,
     sensitivity: &str,
-) -> Result<usize, String> {
-    let model_path = yamnet_model_path(data_dir);
-    if !model_path.is_file() {
-        return Err("yamnet.onnx is not installed".to_string());
-    }
-
+    cached_session: &mut Option<Session>,
+) -> Result<(usize, Vec<YamnetFrameScore>), String> {
     let mut reader =
         hound::WavReader::open(wav_path).map_err(|e| format!("Failed to open WAV: {e}"))?;
     let spec = reader.spec();
@@ -131,17 +133,17 @@ pub fn filter_music_and_singing_wav(
         .map_err(|e| format!("Failed to read WAV samples: {e}"))?;
 
     if pcm_i16.len() < 16_000 {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
     let samples_f32: Vec<f32> = pcm_i16.iter().map(|&s| s as f32 / 32768.0).collect();
 
-    let env = shared_ort_env()?;
-
-    let mut session = Session::builder(env)
-        .map_err(|e| format!("ORT session builder error: {e}"))?
-        .commit_from_file(&model_path)
-        .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))?;
+    if cached_session.is_none() {
+        *cached_session = Some(load_yamnet_session(data_dir)?);
+    }
+    let session = cached_session
+        .as_mut()
+        .ok_or_else(|| "YAMNet session unavailable".to_string())?;
 
     let n_samples = samples_f32.len();
     let input_tensor = Tensor::from_array(([n_samples], samples_f32.into_boxed_slice()))
@@ -161,7 +163,7 @@ pub fn filter_music_and_singing_wav(
     let num_frames = shape[0] as usize;
     let num_classes = shape[1] as usize;
     if num_frames == 0 {
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
 
     // Ratio threshold: keep frame if Speech is strong enough relative to Singing/Music
@@ -174,9 +176,14 @@ pub fn filter_music_and_singing_wav(
     let hop_samples: usize = 7680; // 0.48s at 16kHz
     let frame_samples: usize = 15360; // 0.96s at 16kHz
     let mut keep_frame = vec![true; num_frames];
+    let mut gender_frames = Vec::with_capacity(num_frames);
 
     for f in 0..num_frames {
         let row = &scores[f * num_classes..(f + 1) * num_classes];
+        gender_frames.push(YamnetFrameScore {
+            male: row[MALE_SPEECH_IDX],
+            female: row[FEMALE_SPEECH_IDX],
+        });
         let speech_score = row[SPEECH_IDX];
         let singing_max = SINGING_INDICES
             .iter()
@@ -227,7 +234,7 @@ pub fn filter_music_and_singing_wav(
             .map_err(|e| format!("Failed to finalize filtered WAV: {e}"))?;
     }
 
-    Ok(muted_frames)
+    Ok((muted_frames, gender_frames))
 }
 
 #[cfg(test)]

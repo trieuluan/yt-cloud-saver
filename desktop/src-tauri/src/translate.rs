@@ -1216,6 +1216,8 @@ where
     };
 
     let mut speaker_tracker = crate::diarize::SpeakerTracker::new();
+    let yamnet_session: std::sync::Arc<std::sync::Mutex<Option<ort::session::Session>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
 
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
         let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
@@ -1257,18 +1259,25 @@ where
         };
         let wav_for_ort = temp_pcm_wav.as_deref().unwrap_or(chunk_wav);
 
-        if config.skip_music_whisper {
+        let precomputed_yamnet = if config.skip_music_whisper {
             if crate::yamnet::ensure_yamnet_model(data_dir).await.is_ok() {
                 let d_dir = data_dir.to_path_buf();
                 let w_path = wav_for_ort.to_path_buf();
                 let sens = config.yamnet_sensitivity.clone();
-                let muted = tokio::task::spawn_blocking(move || {
-                    crate::yamnet::filter_music_and_singing_wav(&d_dir, &w_path, &sens)
+                let ys_arc = yamnet_session.clone();
+                let (muted, scores) = tokio::task::spawn_blocking(move || {
+                    let mut guard = ys_arc.lock().unwrap_or_else(|e| e.into_inner());
+                    crate::yamnet::filter_music_and_singing_wav_with_scores(
+                        &d_dir,
+                        &w_path,
+                        &sens,
+                        &mut guard,
+                    )
                 })
                 .await
                 .ok()
                 .and_then(|r| r.ok())
-                .unwrap_or(0);
+                .unwrap_or((0, Vec::new()));
                 if muted > 0 && temp_pcm_wav.is_some() {
                     let _ = Command::new(&ffmpeg)
                         .args([
@@ -1282,8 +1291,17 @@ where
                         .output()
                         .await;
                 }
+                if scores.is_empty() {
+                    None
+                } else {
+                    Some(scores)
+                }
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         let mut chunk_cues = if is_cloud {
             transcribe_chunk_cloud(config, chunk_wav, whisper_lang, offset_ms).await?
@@ -1362,7 +1380,13 @@ where
         let speaker_hints = if latest_cfg.use_speaker_diarization
             && crate::diarize::ensure_wespeaker_model(data_dir).await.is_ok()
         {
-            match speaker_tracker.diarize_chunk(data_dir, wav_for_ort, offset_ms, &chunk_cues) {
+            match speaker_tracker.diarize_chunk_with_yamnet(
+                data_dir,
+                wav_for_ort,
+                offset_ms,
+                &chunk_cues,
+                precomputed_yamnet.as_deref(),
+            ) {
                 Ok(pairs) => {
                     let mut hints = Vec::with_capacity(pairs.len());
                     for (i, (hint, code)) in pairs.into_iter().enumerate() {

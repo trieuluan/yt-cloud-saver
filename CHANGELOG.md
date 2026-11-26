@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.40] - 2026-11-27
+
+### Improved
+- **Single-Pass YAMNet & Job-Scoped ORT Session Cache:** Reused YAMNet gender frame scores from the pre-Whisper music filter in `SpeakerTracker::diarize_chunk_with_yamnet` (halving YAMNet inference per chunk) and cached `ort::Session` instances for YAMNet and WeSpeaker per transcription job so models load once and release RAM on completion.
+
 ## [1.2.39] - 2026-11-27
 
 ### Fixed
