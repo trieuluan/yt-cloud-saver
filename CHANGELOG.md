@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.28] - 2026-11-26
+
+### Improved
+- **Extension Popup UI/UX Redesign:** Compacted `Subtitles & Dub` into two fit-to-screen sub-tabs (`Voice Dubbing` and `Subtitles Style`), added quick `Edge AI / VieNeu / Browser` engine switcher, full-width `Dubbing Voice` picker with `▶ Test` preview, and fixed vertical overflow & long custom voice name clipping.
+
 ## [1.2.27] - 2026-11-26
 
 ### Added & Fixed

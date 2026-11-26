@@ -27,110 +27,126 @@
 
     <!-- SUBTITLES & DUB TAB -->
     <section id="viewSub" class="view">
-      <div class="field-group">
-        <span class="label-sm">Display Mode</span>
-        <div class="grid-2">
-          <button type="button" class="mode-btn" data-mode="translated">Translated Only</button>
-          <button type="button" class="mode-btn active" data-mode="bilingual">Bilingual (Orig + TR)</button>
-        </div>
+      <div class="sub-pills">
+        <button id="pillDub" type="button" class="sub-pill active">🎙 Voice Dubbing</button>
+        <button id="pillSub" type="button" class="sub-pill">💬 Subtitles Style</button>
       </div>
 
-      <div class="card space-y">
-        <div class="between">
-          <span class="label-sm">Subtitle Size</span>
-          <strong id="sizeLabel" class="val-sm">18px</strong>
-        </div>
-        <div class="grid-4">
-          <button type="button" class="sz-btn" data-size="14">S</button>
-          <button type="button" class="sz-btn active" data-size="18">M</button>
-          <button type="button" class="sz-btn" data-size="22">L</button>
-          <button type="button" class="sz-btn" data-size="26">XL</button>
-        </div>
-        <input id="sizeSlider" type="range" min="12" max="32" value="18" class="clean-range" />
-      </div>
-
-      <div class="card space-y">
-        <div class="between">
-          <span class="label-sm">Text Color</span>
-          <div class="swatches">
-            <button type="button" class="swatch clr-btn active" data-color="#ffffff" style="background:#ffffff"></button>
-            <button type="button" class="swatch clr-btn" data-color="#fde047" style="background:#fde047"></button>
-            <button type="button" class="swatch clr-btn" data-color="#67e8f9" style="background:#67e8f9"></button>
-            <button type="button" class="swatch clr-btn" data-color="#86efac" style="background:#86efac"></button>
-            <label class="swatch rainbow" title="Custom text color">
-              <input id="textColorPicker" type="color" value="#ffffff" class="sr-only" />
-            </label>
-          </div>
-        </div>
-
-        <div class="between">
-          <span class="label-sm">Background</span>
-          <div class="swatches">
-            <button type="button" class="swatch bg-btn active" data-bg="#000000" style="background:#000000"></button>
-            <button type="button" class="swatch bg-btn" data-bg="#111827" style="background:#111827"></button>
-            <button type="button" class="swatch bg-btn" data-bg="#1e1b4b" style="background:#1e1b4b"></button>
-            <label class="swatch rainbow" title="Custom background color">
-              <input id="bgColorPicker" type="color" value="#000000" class="sr-only" />
-            </label>
-          </div>
-        </div>
-
-        <div class="space-y-sm">
+      <!-- DUBBING PANEL -->
+      <div id="panelDub" class="space-y">
+        <div class="card space-y">
           <div class="between">
-            <span class="label-sm">Background Opacity</span>
-            <strong id="opacityLabel" class="val-sm">80%</strong>
+            <span class="label-sm">TTS Engine</span>
+            <span id="dubEngineBadge" class="val-sm" style="color:#93c5fd;">Edge · Online</span>
           </div>
-          <input id="opacitySlider" type="range" min="0" max="100" value="80" class="clean-range" />
+          <div class="seg-3">
+            <button id="engEdgeBtn" type="button" class="seg3-btn active">☁️ Edge AI</button>
+            <button id="engVieneuBtn" type="button" class="seg3-btn">🖥 VieNeu</button>
+            <button id="engBrowserBtn" type="button" class="seg3-btn">🔊 Browser</button>
+          </div>
+
+          <div class="space-y-sm">
+            <div class="between">
+              <span class="label-sm">Dubbing Voice</span>
+              <span id="dubVoiceHint" class="label-sm">Microsoft Neural</span>
+            </div>
+            <div class="voice-row">
+              <select id="dubVoiceSelect" class="select-full">
+                <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
+              </select>
+              <button id="popupTestVoiceBtn" type="button" class="btn-xs-inline" title="Nghe thử giọng đang chọn">▶ Test</button>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="mini-box">
+              <div class="between">
+                <span class="label-sm">Speed</span>
+                <strong id="dubSpeedBadge" class="val-sm">1.0x</strong>
+              </div>
+              <select id="dubSpeedSelect" class="select-full" style="padding:5px 7px;">
+                <option value="0.9">0.9x (Slow)</option>
+                <option value="1">1.0x (Natural)</option>
+                <option value="1.1">1.1x (Slightly Fast)</option>
+                <option value="1.2">1.2x (Fast)</option>
+                <option value="1.35">1.35x</option>
+                <option value="1.5">1.5x</option>
+              </select>
+            </div>
+            <div class="mini-box">
+              <div class="between">
+                <span class="label-sm">Original Vol</span>
+                <span id="dubVolLabel" class="val-blue">15%</span>
+              </div>
+              <input id="dubVolSlider" class="clean-range" type="range" min="0" max="100" step="5" value="15" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card space-y-sm">
+          <span class="label-sm">Subtitle Display Mode</span>
+          <div class="grid-2">
+            <button type="button" class="mode-btn" data-mode="translated">Translated Only</button>
+            <button type="button" class="mode-btn active" data-mode="bilingual">Bilingual (Orig + TR)</button>
+          </div>
         </div>
       </div>
 
-      <div class="preview-box">
-        <div id="prevOrig" class="prev-orig">After saving a cold beauty in the storm...</div>
-        <div id="prevTr" class="prev-tr">Sau khi cứu mỹ nhân giữa cơn bão...</div>
-      </div>
+      <!-- SUBTITLES STYLE PANEL -->
+      <div id="panelSub" class="space-y hidden">
+        <div class="preview-box">
+          <div id="prevOrig" class="prev-orig">After saving a cold beauty in the storm...</div>
+          <div id="prevTr" class="prev-tr">Sau khi cứu mỹ nhân giữa cơn bão...</div>
+        </div>
 
-      <div class="card space-y">
-        <div class="between">
-          <span class="label-sm">Dubbing Voice</span>
-          <select id="dubVoiceSelect" class="select-compact">
-            <optgroup label="☁️ Online (Edge AI)">
-              <option value="vi-VN-HoaiMyNeural">Hoài Mỹ (Nữ · Edge AI)</option>
-              <option value="vi-VN-NamMinhNeural">Nam Minh (Nam · Edge AI)</option>
-              <option value="en-US-AriaNeural">Aria (EN · Edge AI)</option>
-              <option value="en-US-GuyNeural">Guy (EN · Edge AI)</option>
-            </optgroup>
-            <optgroup id="dubVieneuGroup" label="🖥 Local Offline (VieNeu-TTS)">
-              <option value="vieneu:default">VieNeu · Mặc định (theo Desktop)</option>
-              <option value="vieneu:Ngọc Huyền">VieNeu · Ngọc Huyền (Nữ Bắc)</option>
-              <option value="vieneu:Trúc Ly">VieNeu · Trúc Ly (Nữ Bắc)</option>
-              <option value="vieneu:Thùy Dung">VieNeu · Thùy Dung (Nữ Nam)</option>
-              <option value="vieneu:Ngọc Trân">VieNeu · Ngọc Trân (Nữ Trung)</option>
-              <option value="vieneu:Hải Đăng">VieNeu · Hải Đăng (Nam Bắc)</option>
-              <option value="vieneu:Thiện Minh">VieNeu · Thiện Minh (Nam Bắc)</option>
-              <option value="vieneu:Quang Sơn">VieNeu · Quang Sơn (Nam Trung)</option>
-              <option value="vieneu:Thái Sơn">VieNeu · Thái Sơn (Nam Nam)</option>
-            </optgroup>
-            <optgroup label="🔊 Fallback">
-              <option value="browser">Browser TTS (Fallback)</option>
-            </optgroup>
-          </select>
+        <div class="card space-y">
+          <div class="between">
+            <span class="label-sm">Subtitle Size</span>
+            <strong id="sizeLabel" class="val-sm">18px</strong>
+          </div>
+          <div class="grid-4">
+            <button type="button" class="sz-btn" data-size="14">S</button>
+            <button type="button" class="sz-btn active" data-size="18">M</button>
+            <button type="button" class="sz-btn" data-size="22">L</button>
+            <button type="button" class="sz-btn" data-size="26">XL</button>
+          </div>
+          <input id="sizeSlider" type="range" min="12" max="32" value="18" class="clean-range" />
         </div>
-        <div class="between">
-          <span class="label-sm">Dubbing Speed</span>
-          <select id="dubSpeedSelect" class="select-compact">
-            <option value="0.9">0.9x (Slow)</option>
-            <option value="1">1.0x (Natural)</option>
-            <option value="1.1">1.1x (Slightly Fast)</option>
-            <option value="1.2">1.2x (Fast)</option>
-            <option value="1.35">1.35x</option>
-            <option value="1.5">1.5x</option>
-          </select>
+
+        <div class="card space-y">
+          <div class="between">
+            <span class="label-sm">Text Color</span>
+            <div class="swatches">
+              <button type="button" class="swatch clr-btn active" data-color="#ffffff" style="background:#ffffff"></button>
+              <button type="button" class="swatch clr-btn" data-color="#fde047" style="background:#fde047"></button>
+              <button type="button" class="swatch clr-btn" data-color="#67e8f9" style="background:#67e8f9"></button>
+              <button type="button" class="swatch clr-btn" data-color="#86efac" style="background:#86efac"></button>
+              <label class="swatch rainbow" title="Custom text color">
+                <input id="textColorPicker" type="color" value="#ffffff" class="sr-only" />
+              </label>
+            </div>
+          </div>
+
+          <div class="between">
+            <span class="label-sm">Background</span>
+            <div class="swatches">
+              <button type="button" class="swatch bg-btn active" data-bg="#000000" style="background:#000000"></button>
+              <button type="button" class="swatch bg-btn" data-bg="#111827" style="background:#111827"></button>
+              <button type="button" class="swatch bg-btn" data-bg="#1e1b4b" style="background:#1e1b4b"></button>
+              <label class="swatch rainbow" title="Custom background color">
+                <input id="bgColorPicker" type="color" value="#000000" class="sr-only" />
+              </label>
+            </div>
+          </div>
+
+          <div class="space-y-sm">
+            <div class="between">
+              <span class="label-sm">Background Opacity</span>
+              <strong id="opacityLabel" class="val-sm">80%</strong>
+            </div>
+            <input id="opacitySlider" type="range" min="0" max="100" value="80" class="clean-range" />
+          </div>
         </div>
-        <div class="between" style="margin-bottom:6px">
-          <span class="label-sm">Original volume during Dub</span>
-          <span id="dubVolLabel" class="val-blue">15%</span>
-        </div>
-        <input id="dubVolSlider" class="clean-range" type="range" min="0" max="100" step="5" value="15" />
       </div>
     </section>
 
@@ -196,7 +212,7 @@
     </section>
 
     <footer class="popup-footer">
-      <span class="footer-ver">YT Cloud Saver · v1.2.26</span>
+      <span class="footer-ver">YT Cloud Saver · v1.2.28</span>
       <button id="popSupportBtn" class="footer-link" type="button">☕ Support</button>
     </footer>
 

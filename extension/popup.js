@@ -25,6 +25,17 @@ const dubVolLabel = document.getElementById('dubVolLabel');
 const remoteInput = document.getElementById('remoteInput');
 const dubVoiceSelect = document.getElementById('dubVoiceSelect');
 const dubSpeedSelect = document.getElementById('dubSpeedSelect');
+const dubSpeedBadge = document.getElementById('dubSpeedBadge');
+const pillDub = document.getElementById('pillDub');
+const pillSub = document.getElementById('pillSub');
+const panelDub = document.getElementById('panelDub');
+const panelSub = document.getElementById('panelSub');
+const engEdgeBtn = document.getElementById('engEdgeBtn');
+const engVieneuBtn = document.getElementById('engVieneuBtn');
+const engBrowserBtn = document.getElementById('engBrowserBtn');
+const dubEngineBadge = document.getElementById('dubEngineBadge');
+const dubVoiceHint = document.getElementById('dubVoiceHint');
+const popupTestVoiceBtn = document.getElementById('popupTestVoiceBtn');
 const remoteSuggestions = document.getElementById('remoteSuggestions');
 const browseBtn = document.getElementById('browseBtn');
 const browserBox = document.getElementById('browserBox');
@@ -104,18 +115,89 @@ function renderSubStyle() {
 
   opacitySlider.value = subStyle.bgOpacity;
   opacityLabel.textContent = `${subStyle.bgOpacity}%`;
-  dubVoiceSelect.value = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+  const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+  const eng = curVoice === 'browser' ? 'browser' : curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
+  renderDubEngine(eng, curVoice);
   dubSpeedSelect.value = String(Number(subStyle.dubSpeed ?? 1));
+  if (dubSpeedBadge) dubSpeedBadge.textContent = `${Number(subStyle.dubSpeed ?? 1).toFixed(1)}x`;
   const volPct = Math.round(Number(subStyle.dubVolume ?? 0.15) * 100);
   dubVolSlider.value = String(volPct);
   dubVolLabel.textContent = `${volPct}%`;
 
   const a = subStyle.bgOpacity / 100;
-  prevTr.style.fontSize = `${subStyle.fontSize}px`;
+  prevTr.style.fontSize = `${Math.min(20, Math.round(subStyle.fontSize * 0.68))}px`;
   prevTr.style.color = subStyle.textColor;
   prevTr.style.background = hexToRgba(subStyle.bgColor, a);
-  prevOrig.style.fontSize = `${Math.max(11, Math.round(subStyle.fontSize * 0.78))}px`;
+  prevOrig.style.fontSize = `${Math.max(10, Math.round(Math.min(20, subStyle.fontSize * 0.68) * 0.72))}px`;
   prevOrig.style.background = hexToRgba(subStyle.bgColor, (a * 0.85).toFixed(2));
+}
+
+const EDGE_VOICES = [
+  { value: 'vi-VN-HoaiMyNeural', label: 'Hoài Mỹ (Nữ · Edge AI)' },
+  { value: 'vi-VN-NamMinhNeural', label: 'Nam Minh (Nam · Edge AI)' },
+  { value: 'en-US-AriaNeural', label: 'Aria (EN · Edge AI)' },
+  { value: 'en-US-GuyNeural', label: 'Guy (EN · Edge AI)' },
+];
+
+const VIENEU_PRESET_VOICES = [
+  { value: 'vieneu:default', label: 'VieNeu · Mặc định (theo Desktop)' },
+  { value: 'vieneu:Ngọc Huyền', label: 'VieNeu · Ngọc Huyền (Nữ Bắc)' },
+  { value: 'vieneu:Trúc Ly', label: 'VieNeu · Trúc Ly (Nữ Bắc)' },
+  { value: 'vieneu:Thùy Dung', label: 'VieNeu · Thùy Dung (Nữ Nam)' },
+  { value: 'vieneu:Ngọc Trân', label: 'VieNeu · Ngọc Trân (Nữ Trung)' },
+  { value: 'vieneu:Hải Đăng', label: 'VieNeu · Hải Đăng (Nam Bắc)' },
+  { value: 'vieneu:Thiện Minh', label: 'VieNeu · Thiện Minh (Nam Bắc)' },
+  { value: 'vieneu:Quang Sơn', label: 'VieNeu · Quang Sơn (Nam Trung)' },
+  { value: 'vieneu:Thái Sơn', label: 'VieNeu · Thái Sơn (Nam Nam)' },
+];
+
+let customVieneuVoices = [];
+let vieneuStatusInfo = { runtimeInstalled: false, downloadedModels: [], sidecarRunning: false };
+
+function renderDubEngine(eng, selectedVoice) {
+  engEdgeBtn?.classList.toggle('active', eng === 'edge');
+  engVieneuBtn?.classList.toggle('active', eng === 'vieneu');
+  engBrowserBtn?.classList.toggle('active', eng === 'browser');
+
+  let list = [];
+  if (eng === 'vieneu') {
+    list = [
+      ...customVieneuVoices.map((v) => ({ value: `vieneu:custom:${v.id}`, label: `🎙 ${v.name}` })),
+      ...VIENEU_PRESET_VOICES,
+    ];
+    if (dubVoiceHint) dubVoiceHint.textContent = 'Local Offline';
+    if (dubEngineBadge) {
+      const ready = vieneuStatusInfo.runtimeInstalled && (vieneuStatusInfo.downloadedModels?.length || 0) > 0;
+      dubEngineBadge.textContent = ready
+        ? (vieneuStatusInfo.sidecarRunning ? 'VieNeu · Ready' : 'VieNeu · Installed')
+        : 'VieNeu · Not installed';
+      dubEngineBadge.style.color = ready ? '#86efac' : '#fbbf24';
+    }
+  } else if (eng === 'browser') {
+    list = [{ value: 'browser', label: 'Browser / macOS System TTS' }];
+    if (dubVoiceHint) dubVoiceHint.textContent = 'System Fallback';
+    if (dubEngineBadge) {
+      dubEngineBadge.textContent = 'System TTS';
+      dubEngineBadge.style.color = '#9aa3b2';
+    }
+  } else {
+    list = EDGE_VOICES;
+    if (dubVoiceHint) dubVoiceHint.textContent = 'Microsoft Neural';
+    if (dubEngineBadge) {
+      dubEngineBadge.textContent = 'Edge · Online';
+      dubEngineBadge.style.color = '#93c5fd';
+    }
+  }
+
+  dubVoiceSelect.innerHTML = '';
+  for (const item of list) {
+    const opt = document.createElement('option');
+    opt.value = item.value;
+    opt.textContent = item.label;
+    dubVoiceSelect.appendChild(opt);
+  }
+  const match = list.find((i) => i.value === selectedVoice);
+  dubVoiceSelect.value = match ? selectedVoice : list[0]?.value || 'vi-VN-HoaiMyNeural';
 }
 
 async function saveSubStyle() {
@@ -124,22 +206,13 @@ async function saveSubStyle() {
 }
 
 async function loadCustomVieneuVoices() {
-  const group = document.getElementById('dubVieneuGroup');
-  if (!group) return;
   try {
     const resp = await fetch('http://127.0.0.1:4873/vieneu/status');
     if (!resp.ok) return;
     const data = await resp.json();
-    group.querySelectorAll('[data-custom-voice]').forEach((el) => el.remove());
-    const customs = Array.isArray(data.customVoices) ? data.customVoices : [];
-    for (const v of customs) {
-      const opt = document.createElement('option');
-      opt.value = `vieneu:custom:${v.id}`;
-      opt.textContent = `VieNeu · 🎙 ${v.name}`;
-      opt.dataset.customVoice = '1';
-      group.appendChild(opt);
-    }
-    dubVoiceSelect.value = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    vieneuStatusInfo = data;
+    customVieneuVoices = Array.isArray(data.customVoices) ? data.customVoices : [];
+    renderSubStyle();
   } catch {
     // Desktop offline
   }
@@ -329,6 +402,76 @@ async function loadState() {
 
 tabSub.addEventListener('click', () => switchTab(true));
 tabCloud.addEventListener('click', () => switchTab(false));
+
+function switchSubPill(which) {
+  const isDub = which === 'dub';
+  pillDub?.classList.toggle('active', isDub);
+  pillSub?.classList.toggle('active', !isDub);
+  panelDub?.classList.toggle('hidden', !isDub);
+  panelSub?.classList.toggle('hidden', isDub);
+}
+
+pillDub?.addEventListener('click', () => switchSubPill('dub'));
+pillSub?.addEventListener('click', () => switchSubPill('sub'));
+
+engEdgeBtn?.addEventListener('click', () => {
+  subStyle.dubVoice = 'vi-VN-HoaiMyNeural';
+  saveSubStyle();
+});
+engVieneuBtn?.addEventListener('click', () => {
+  const firstCustom = customVieneuVoices[0]?.id ? `vieneu:custom:${customVieneuVoices[0].id}` : 'vieneu:default';
+  subStyle.dubVoice = firstCustom;
+  saveSubStyle();
+});
+engBrowserBtn?.addEventListener('click', () => {
+  subStyle.dubVoice = 'browser';
+  saveSubStyle();
+});
+
+let popupPreviewAudio = null;
+popupTestVoiceBtn?.addEventListener('click', async () => {
+  if (popupPreviewAudio && !popupPreviewAudio.paused) {
+    popupPreviewAudio.pause();
+    popupPreviewAudio = null;
+    popupTestVoiceBtn.textContent = '▶ Test';
+    return;
+  }
+  const voice = dubVoiceSelect.value || 'vi-VN-HoaiMyNeural';
+  const sample = voice.startsWith('en-')
+    ? 'Hello, this is a voice preview from YT Cloud Saver.'
+    : 'Xin chào, đây là giọng đọc thử của YT Cloud Saver.';
+  if (voice === 'browser') {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(sample);
+      u.lang = 'vi-VN';
+      window.speechSynthesis.speak(u);
+    }
+    return;
+  }
+  popupTestVoiceBtn.disabled = true;
+  popupTestVoiceBtn.textContent = 'Loading...';
+  try {
+    const url = `http://127.0.0.1:4873/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(sample)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objUrl);
+    popupPreviewAudio = audio;
+    popupTestVoiceBtn.textContent = '■ Stop';
+    audio.onended = () => {
+      URL.revokeObjectURL(objUrl);
+      if (popupPreviewAudio === audio) popupPreviewAudio = null;
+      popupTestVoiceBtn.textContent = '▶ Test';
+    };
+    await audio.play();
+  } catch {
+    popupTestVoiceBtn.textContent = '▶ Test';
+  } finally {
+    popupTestVoiceBtn.disabled = false;
+  }
+});
 
 modeBtns.forEach((b) =>
   b.addEventListener('click', () => {
