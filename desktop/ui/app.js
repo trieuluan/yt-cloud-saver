@@ -288,20 +288,35 @@ function renderJobs(jobs = [], translations = []) {
     })
     .join('');
 
-  const openExportFile = jobsList.querySelector('.export-dropdown.open')?.getAttribute('data-file') || null;
+  const openDropdownEl = jobsList.querySelector('.export-dropdown.open');
+  const openDropdownKind = openDropdownEl?.getAttribute('data-kind') || null;
+  const openDropdownFile = openDropdownEl?.getAttribute('data-file') || null;
 
   const subHtml = cachedItems
     .map(
       (sub) => {
-        const isOpen = openExportFile === sub.fileName ? ' open' : '';
+        const isRerunOpen = openDropdownKind === 'rerun' && openDropdownFile === sub.fileName ? ' open' : '';
+        const isExportOpen = openDropdownKind === 'export' && openDropdownFile === sub.fileName ? ' open' : '';
         return `
       <div class="job-item">
         <div class="job-title"><span class="kind-pill kind-sub">Sub ✓</span>${escapeHtml(sub.title)}</div>
         <div class="sub-footer">
           <div class="job-meta">${escapeHtml(sub.targetLang)} · ${escapeHtml(sub.source)} · ${sub.lineCount} lines</div>
           <div class="btn-group">
-            <button type="button" class="btn-accent-ghost btn-xs" data-retranslate-sub="${escapeHtml(sub.fileName)}">↻ Re-translate</button>
-            <div class="export-dropdown${isOpen}" data-file="${escapeHtml(sub.fileName)}">
+            <div class="export-dropdown${isRerunOpen}" data-kind="rerun" data-file="${escapeHtml(sub.fileName)}">
+              <button type="button" class="btn-accent-ghost btn-xs" data-rerun-toggle="${escapeHtml(sub.fileName)}" title="Re-translate existing text or re-run Whisper from audio">↻ Re-run ▾</button>
+              <div class="export-menu rerun-menu">
+                <button type="button" class="export-option" data-retranslate-sub="${escapeHtml(sub.fileName)}" title="Keep cached transcription/CC and only re-translate lines">
+                  <span class="menu-item-title" style="color:#d8b4fe;">↻ Re-translate</span>
+                  <span class="menu-item-desc">Keep original text · AI translates again (fast)</span>
+                </button>
+                <button type="button" class="export-option" data-rewhisper-sub="${escapeHtml(sub.fileName)}" title="Delete cached subtitles, download audio, re-run Whisper & translate">
+                  <span class="menu-item-title" style="color:#7dd3fc;">🎙 Re-whisper + Translate</span>
+                  <span class="menu-item-desc">Re-download audio · Whisper again from scratch</span>
+                </button>
+              </div>
+            </div>
+            <div class="export-dropdown${isExportOpen}" data-kind="export" data-file="${escapeHtml(sub.fileName)}">
               <button type="button" class="btn-ghost btn-xs" data-export-toggle="${escapeHtml(sub.fileName)}">Export .srt ▾</button>
               <div class="export-menu">
                 <button type="button" class="export-option" data-export-sub="${escapeHtml(sub.fileName)}" data-export-mode="translated">Translated (${escapeHtml(sub.targetLang)})</button>
@@ -730,10 +745,10 @@ fltBtns.forEach((btn) => {
 
 jobsList.addEventListener('click', async (e) => {
   const target = e.target;
-  const toggleFile = target.getAttribute('data-export-toggle');
-  if (toggleFile) {
+  const toggleBtn = target.closest('[data-export-toggle], [data-rerun-toggle]');
+  if (toggleBtn) {
     e.stopPropagation();
-    const current = target.closest('.export-dropdown');
+    const current = toggleBtn.closest('.export-dropdown');
     const wasOpen = current?.classList.contains('open');
     jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
     if (current && !wasOpen) current.classList.add('open');
@@ -745,7 +760,10 @@ jobsList.addEventListener('click', async (e) => {
   const deleteId = target.getAttribute('data-delete');
   const exportSub = target.getAttribute('data-export-sub');
   const exportMode = target.getAttribute('data-export-mode') || 'translated';
-  const retranslateSub = target.getAttribute('data-retranslate-sub');
+  const retranslateBtn = target.closest('[data-retranslate-sub]');
+  const rewhisperBtn = target.closest('[data-rewhisper-sub]');
+  const retranslateSub = retranslateBtn?.getAttribute('data-retranslate-sub');
+  const rewhisperSub = rewhisperBtn?.getAttribute('data-rewhisper-sub');
   const deleteSub = target.getAttribute('data-delete-sub');
   if (cancelId) {
     await invoke('cancel_job', { id: cancelId });
@@ -767,12 +785,22 @@ jobsList.addEventListener('click', async (e) => {
       activityHint.textContent = `Export failed: ${err}`;
     }
   } else if (retranslateSub) {
+    jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
     try {
       await invoke('retranslate_subtitle_cache', { fileName: retranslateSub });
       await loadState();
     } catch (err) {
       activityHint.classList.remove('hidden');
       activityHint.textContent = `Re-translate failed: ${err}`;
+    }
+  } else if (rewhisperSub) {
+    jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
+    try {
+      await invoke('rewhisper_subtitle_cache', { fileName: rewhisperSub });
+      await loadState();
+    } catch (err) {
+      activityHint.classList.remove('hidden');
+      activityHint.textContent = `Re-whisper failed: ${err}`;
     }
   } else if (deleteSub) {
     await invoke('delete_subtitle_cache', { fileName: deleteSub });

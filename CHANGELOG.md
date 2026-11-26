@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.12] - 2026-11-26
+
+### Added & Improved
+- **`↻ Re-run ▾` Dropdown on Cached Subtitles:** Replaced `↻ Re-translate` with a compact `↻ Re-run ▾` dropdown on `Sub ✓` cards offering both **↻ Re-translate** (keep original text, re-translate fast) and **🎙 Re-whisper + Translate** (clear cache, re-download audio, re-run Whisper with current model/language, and re-translate).
+
 ## [1.2.11] - 2026-11-26
 
 ### Added & Fixed

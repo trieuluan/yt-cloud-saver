@@ -237,6 +237,16 @@ async fn retranslate_subtitle_cache(
 }
 
 #[tauri::command]
+async fn rewhisper_subtitle_cache(
+    state: State<'_, AppState>,
+    file_name: String,
+) -> Result<Job, String> {
+    let (video_id, title) = translate::prepare_rewhisper_from_cache(&state.data_dir, &file_name)?;
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    Ok(state.jobs.enqueue_translate(url, video_id, title).await)
+}
+
+#[tauri::command]
 async fn backup_subtitles_cloud(state: State<'_, AppState>) -> Result<usize, String> {
     let cfg = load_config(&state.data_dir);
     translate::backup_subtitles_to_cloud(&state.data_dir, &state.bin_dir, &cfg.rclone_remote).await
@@ -414,6 +424,7 @@ pub fn run() {
             export_subtitle_srt,
             delete_subtitle_cache,
             retranslate_subtitle_cache,
+            rewhisper_subtitle_cache,
             backup_subtitles_cloud,
             restore_subtitles_cloud,
             check_app_update,

@@ -1160,6 +1160,21 @@ pub fn prepare_retranslate_from_cache(
     Ok((bundle.video_id, bundle.title))
 }
 
+pub fn prepare_rewhisper_from_cache(
+    data_dir: &Path,
+    file_name: &str,
+) -> Result<(String, String), String> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid file name".to_string());
+    }
+    let path = data_dir.join("subtitles").join(file_name);
+    let raw = fs::read_to_string(&path).map_err(|e| format!("Subtitle cache not found: {e}"))?;
+    let bundle: SubtitleBundle = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_file(raw_cache_path(data_dir, &bundle.video_id));
+    Ok((bundle.video_id, bundle.title))
+}
+
 pub fn export_cached_srt(
     data_dir: &Path,
     file_name: &str,
