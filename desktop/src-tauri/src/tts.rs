@@ -3,8 +3,9 @@ use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
+use tokio::process::Command;
 use tokio::sync::Semaphore;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -403,6 +404,12 @@ async fn synthesize_edge_tts_once(
     Ok(audio_bytes)
 }
 
+static EDGE_TTS_SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn edge_tts_sem() -> Arc<Semaphore> {
+    EDGE_TTS_SEM.get_or_init(|| Arc::new(Semaphore::new(2))).clone()
+}
+
 pub async fn synthesize_edge_tts(
     data_dir: &Path,
     text: &str,
@@ -419,6 +426,18 @@ pub async fn synthesize_edge_tts(
 
     let cache_dir = data_dir.join("tts_cache");
     let cache_path = cache_dir.join(format!("{}.mp3", cache_key(&voice_name, &rate_str, clean_text)));
+    if let Ok(cached) = fs::read(&cache_path) {
+        if !cached.is_empty() {
+            return Ok(cached);
+        }
+    }
+
+    let sem = edge_tts_sem();
+    let Ok(_permit) = sem.acquire().await else {
+        return Err("TTS semaphore closed".to_string());
+    };
+
+    // Re-check cache after acquiring semaphore in case another task just populated it
     if let Ok(cached) = fs::read(&cache_path) {
         if !cached.is_empty() {
             return Ok(cached);
@@ -446,6 +465,87 @@ pub async fn synthesize_edge_tts(
         }
     }
     Err(last_err)
+}
+
+#[cfg(target_os = "macos")]
+async fn synthesize_macos_say_mp3(
+    bin_dir: &Path,
+    text: &str,
+    voice_name: &str,
+) -> Result<Vec<u8>, String> {
+    let ffmpeg = crate::tools::find_binary("ffmpeg", bin_dir)
+        .ok_or_else(|| "ffmpeg not found for macOS say fallback".to_string())?;
+    let mac_voice = if voice_name.starts_with("vi-") {
+        "Linh"
+    } else {
+        "Samantha"
+    };
+    let id = Uuid::new_v4().simple().to_string();
+    let tmp_dir = std::env::temp_dir();
+    let aiff_path = tmp_dir.join(format!("ytcs_say_{id}.aiff"));
+    let mp3_path = tmp_dir.join(format!("ytcs_say_{id}.mp3"));
+
+    let say_ok = Command::new("say")
+        .args(["-v", mac_voice, "-o"])
+        .arg(&aiff_path)
+        .arg("--")
+        .arg(text)
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !say_ok || !aiff_path.is_file() {
+        let _ = fs::remove_file(&aiff_path);
+        return Err("macOS say command failed".to_string());
+    }
+
+    let ff_ok = Command::new(&ffmpeg)
+        .args(["-y", "-i"])
+        .arg(&aiff_path)
+        .args(["-ar", "24000", "-ac", "1", "-b:a", "48k"])
+        .arg(&mp3_path)
+        .env("PATH", crate::tools::build_env_path(bin_dir))
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let _ = fs::remove_file(&aiff_path);
+    let bytes = if ff_ok { fs::read(&mp3_path).ok() } else { None };
+    let _ = fs::remove_file(&mp3_path);
+
+    bytes.filter(|b| !b.is_empty())
+        .ok_or_else(|| "Failed to encode macOS say fallback MP3".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn synthesize_macos_say_mp3(
+    _bin_dir: &Path,
+    _text: &str,
+    _voice_name: &str,
+) -> Result<Vec<u8>, String> {
+    Err("Offline say fallback only available on macOS".to_string())
+}
+
+pub async fn synthesize_edge_tts_with_fallback(
+    data_dir: &Path,
+    bin_dir: &Path,
+    text: &str,
+    voice: Option<&str>,
+    rate: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    match synthesize_edge_tts(data_dir, text, voice, rate).await {
+        Ok(bytes) => Ok(bytes),
+        Err(edge_err) => {
+            let voice_name = sanitize_voice(voice);
+            if let Ok(fallback) = synthesize_macos_say_mp3(bin_dir, text.trim(), &voice_name).await {
+                Ok(fallback)
+            } else {
+                Err(edge_err)
+            }
+        }
+    }
 }
 
 pub async fn prepare_edge_tts_batch(

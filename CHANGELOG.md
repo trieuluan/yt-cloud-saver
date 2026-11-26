@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.26] - 2026-11-26
+
+### Fixed & Improved
+- **Global Edge TTS Rate-Limit Guard & Offline macOS Fallback:** Enforced a shared 2-connection semaphore across `/tts` and `/tts/prepare` (plus smaller 8-cue initial / 12-cue rolling bursts) so Microsoft never throttles/drops WebSockets, and added an automatic macOS `say -v Linh` → MP3 offline fallback on `/tts` so Dubbing never drops a line.
+
 ## [1.2.25] - 2026-11-26
 
 ### Fixed

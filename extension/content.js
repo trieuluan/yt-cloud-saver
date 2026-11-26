@@ -849,11 +849,11 @@
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
     if (voice === 'browser' || !subBundle?.cues?.length || prefetchInFlight) return;
     pruneRamCacheWindow(idx, voice, '+15%');
-    prepareBatchAhead(idx + 1, 24);
+    prepareBatchAhead(idx + 1, 12);
     prefetchInFlight = true;
     try {
       const tasks = [];
-      for (let offset = 1; offset <= 4; offset += 1) {
+      for (let offset = 1; offset <= 3; offset += 1) {
         const nextCue = subBundle.cues[idx + offset];
         const nextText = nextCue?.translated?.trim();
         if (hasSpeakableText(nextText)) {
@@ -1130,10 +1130,10 @@
           dubBtnEl.dataset.state = 'working';
           const txt = dubBtnEl.querySelector('.txt');
           if (txt) txt.textContent = 'Dub: Buffering...';
-          await prepareBatchAhead(curIdx, 16);
-          // Pre-warm first 6 cues directly into browser RAM cache for instant 0ms playback
+          await prepareBatchAhead(curIdx, 8);
+          // Pre-warm first 4 cues directly into browser RAM cache for instant 0ms playback
           const preloadTasks = [];
-          for (let i = curIdx; i < Math.min(subBundle?.cues?.length || 0, curIdx + 6); i += 1) {
+          for (let i = curIdx; i < Math.min(subBundle?.cues?.length || 0, curIdx + 4); i += 1) {
             const t = subBundle.cues[i]?.translated?.trim();
             if (hasSpeakableText(t)) {
               preloadTasks.push(fetchEdgeTtsAudio(t, voice, '+15%').catch(() => {}));

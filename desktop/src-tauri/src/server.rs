@@ -277,8 +277,9 @@ async fn get_tts(
     State(st): State<ServerState>,
     Query(q): Query<TtsQuery>,
 ) -> Response {
-    match crate::tts::synthesize_edge_tts(
+    match crate::tts::synthesize_edge_tts_with_fallback(
         &st.data_dir,
+        &st.bin_dir,
         &q.text,
         q.voice.as_deref(),
         q.rate.as_deref(),
