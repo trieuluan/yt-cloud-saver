@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.9] - 2026-11-26
+
+### Fixed & Improved
+- **Whisper Hallucination Loop Prevention & Auto-Repair:** Added `-mc 0` and `-et 2.4` to `whisper-cli` to break 30s-window context repetition loops, plus automatic post-chunk detection & audio-filtered (`highpass=f=120,loudnorm`, `-bs 5`) re-transcription for stuck/low-CPS segments.
+- **Live App Version Badge:** Desktop App header now displays the live app version (`v1.2.9 · Background service active`) from `CARGO_PKG_VERSION`.
+
 ## [1.2.8] - 2026-11-26
 
 ### Added & Improved

@@ -73,6 +73,7 @@ const guideBtn = document.getElementById('guideBtn');
 const guideModal = document.getElementById('guideModal');
 const closeGuideBtn = document.getElementById('closeGuideBtn');
 const supportBtn = document.getElementById('supportBtn');
+const appVersionBadge = document.getElementById('appVersionBadge');
 const supportModal = document.getElementById('supportModal');
 const closeSupportBtn = document.getElementById('closeSupportBtn');
 const checkUpdateBtn = document.getElementById('checkUpdateBtn');
@@ -397,6 +398,9 @@ async function handleConnectDrive(triggerBtn) {
 async function loadState() {
   try {
     const data = await invoke('get_dashboard_state');
+    if (data.appVersion && appVersionBadge) {
+      appVersionBadge.textContent = `v${data.appVersion}`;
+    }
     renderTools(data.tools);
     detectedRemotes = data.remotes || [];
 

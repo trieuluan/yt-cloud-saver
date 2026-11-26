@@ -34,6 +34,7 @@ pub struct AppState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardState {
+    pub app_version: String,
     pub tools: ToolsStatus,
     pub whisper: WhisperStatus,
     pub remotes: Vec<String>,
@@ -56,6 +57,7 @@ async fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardStat
     let translations = translate::list_cached_subtitles(&state.data_dir);
     let config = load_config(&state.data_dir);
     Ok(DashboardState {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
         tools,
         whisper,
         remotes,

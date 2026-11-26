@@ -178,6 +178,149 @@ fn parse_vtt_or_srt(content: &str) -> Vec<SubtitleCue> {
     cues
 }
 
+fn is_suspicious_whisper_cue(cue: &SubtitleCue) -> bool {
+    let dur_ms = cue.end_ms.saturating_sub(cue.start_ms);
+    let chars = cue.original.trim().chars().count();
+    dur_ms >= 15_000 && chars <= 8
+}
+
+fn find_hallucination_ranges(cues: &[SubtitleCue]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut i = 0usize;
+    while i < cues.len() {
+        let mut j = i + 1;
+        while j < cues.len() && cues[j].original.trim() == cues[i].original.trim() {
+            j += 1;
+        }
+        if j - i >= 3 {
+            ranges.push((i, j));
+            i = j;
+            continue;
+        }
+        if is_suspicious_whisper_cue(&cues[i]) {
+            let mut k = i + 1;
+            while k < cues.len() && is_suspicious_whisper_cue(&cues[k]) {
+                k += 1;
+            }
+            if k - i >= 2 {
+                ranges.push((i, k));
+                i = k;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    ranges
+}
+
+async fn repair_whisper_chunk_cues(
+    cues: Vec<SubtitleCue>,
+    chunk_wav: &Path,
+    offset_ms: u64,
+    tmp_dir: &Path,
+    idx: usize,
+    whisper: &Path,
+    ffmpeg: &Path,
+    model_path: &Path,
+    bin_dir: &Path,
+) -> Vec<SubtitleCue> {
+    let bad_ranges = find_hallucination_ranges(&cues);
+    if bad_ranges.is_empty() {
+        return cues;
+    }
+
+    let mut out: Vec<SubtitleCue> = Vec::with_capacity(cues.len());
+    let mut cursor = 0usize;
+
+    for (r_idx, (start_i, end_i)) in bad_ranges.into_iter().enumerate() {
+        out.extend_from_slice(&cues[cursor..start_i]);
+
+        let rel_start_ms = cues[start_i].start_ms.saturating_sub(offset_ms);
+        let rel_end_ms = cues[end_i - 1].end_ms.saturating_sub(offset_ms);
+        let dur_ms = rel_end_ms.saturating_sub(rel_start_ms);
+
+        let mut repaired: Vec<SubtitleCue> = Vec::new();
+        if dur_ms >= 2000 && dur_ms <= 900_000 {
+            let clip_wav = tmp_dir.join(format!("repair_{idx}_{r_idx}.wav"));
+            let start_s = format!("{:.3}", rel_start_ms as f64 / 1000.0);
+            let dur_s = format!("{:.3}", dur_ms as f64 / 1000.0);
+            let ff_ok = Command::new(ffmpeg)
+                .args([
+                    "-y",
+                    "-ss",
+                    &start_s,
+                    "-t",
+                    &dur_s,
+                    "-i",
+                    &chunk_wav.to_string_lossy(),
+                    "-af",
+                    "highpass=f=120,loudnorm",
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    &clip_wav.to_string_lossy(),
+                ])
+                .env("PATH", build_env_path(bin_dir))
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if ff_ok && clip_wav.is_file() {
+                let rep_prefix = tmp_dir.join(format!("repair_out_{idx}_{r_idx}"));
+                let wh_ok = Command::new(whisper)
+                    .args([
+                        "-m",
+                        &model_path.to_string_lossy(),
+                        "-mc",
+                        "0",
+                        "-bs",
+                        "5",
+                        "-et",
+                        "2.4",
+                        "-f",
+                        &clip_wav.to_string_lossy(),
+                        "-osrt",
+                        "-of",
+                        &rep_prefix.to_string_lossy(),
+                    ])
+                    .env("PATH", build_env_path(bin_dir))
+                    .output()
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                let _ = fs::remove_file(&clip_wav);
+                let rep_srt = tmp_dir.join(format!("repair_out_{idx}_{r_idx}.srt"));
+                if wh_ok && rep_srt.is_file() {
+                    let raw = fs::read_to_string(&rep_srt).unwrap_or_default();
+                    let _ = fs::remove_file(&rep_srt);
+                    for mut c in parse_vtt_or_srt(&raw) {
+                        c.start_ms += offset_ms + rel_start_ms;
+                        c.end_ms += offset_ms + rel_start_ms;
+                        repaired.push(c);
+                    }
+                }
+            }
+        }
+
+        if !find_hallucination_ranges(&repaired).is_empty() {
+            if let Some(first) = cues.get(start_i) {
+                out.push(first.clone());
+            }
+        } else if !repaired.is_empty() {
+            out.extend(repaired);
+        } else if let Some(first) = cues.get(start_i) {
+            out.push(first.clone());
+        }
+
+        cursor = end_i;
+    }
+
+    out.extend_from_slice(&cues[cursor..]);
+    out
+}
+
 async fn extract_raw_cues<F>(
     data_dir: &Path,
     bin_dir: &Path,
@@ -311,7 +454,7 @@ where
     on_progress(20, "Preparing audio chunks...".to_string());
 
     let seg_pattern = tmp_dir.join("chunk_%03d.wav");
-    let ff_out = Command::new(ffmpeg)
+    let ff_out = Command::new(&ffmpeg)
         .args([
             "-y",
             "-i",
@@ -378,6 +521,10 @@ where
             .args([
                 "-m",
                 &model_path.to_string_lossy(),
+                "-mc",
+                "0",
+                "-et",
+                "2.4",
                 "-bs",
                 "1",
                 "-f",
@@ -404,12 +551,24 @@ where
 
         let srt_raw = fs::read_to_string(&srt_path).unwrap_or_default();
         let offset_ms = (idx as u64) * CHUNK_MS;
-        let mut chunk_cues = Vec::new();
+        let mut raw_chunk_cues = Vec::new();
         for mut cue in parse_vtt_or_srt(&srt_raw) {
             cue.start_ms += offset_ms;
             cue.end_ms += offset_ms;
-            chunk_cues.push(cue);
+            raw_chunk_cues.push(cue);
         }
+        let mut chunk_cues = repair_whisper_chunk_cues(
+            raw_chunk_cues,
+            chunk_wav,
+            offset_ms,
+            &tmp_dir,
+            idx,
+            &whisper,
+            &ffmpeg,
+            &model_path,
+            bin_dir,
+        )
+        .await;
         let _ = fs::remove_file(chunk_wav);
         raw_all.extend(chunk_cues.clone());
         save_raw_cache(data_dir, video_id, "whisper", &raw_all);
