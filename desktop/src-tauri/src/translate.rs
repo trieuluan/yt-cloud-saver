@@ -97,17 +97,156 @@ fn save_raw_cache(
     }
 }
 
-fn list_chunk_wavs(tmp_dir: &Path) -> Vec<PathBuf> {
+fn list_chunk_audio(tmp_dir: &Path, is_cloud: bool) -> Vec<PathBuf> {
+    let want_ext = if is_cloud { "mp3" } else { "wav" };
     let mut files: Vec<PathBuf> = fs::read_dir(tmp_dir)
         .ok()
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("wav"))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(want_ext))
         .collect();
     files.sort();
     files
+}
+
+#[derive(Debug, Deserialize)]
+struct CloudWhisperSegment {
+    start: f64,
+    end: f64,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CloudWhisperResponse {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    segments: Vec<CloudWhisperSegment>,
+}
+
+pub async fn test_whisper_cloud_connection(config: &AppConfig) -> Result<String, String> {
+    let base = if config.whisper_cloud_base_url.trim().is_empty() {
+        "https://api.groq.com/openai/v1"
+    } else {
+        config.whisper_cloud_base_url.trim().trim_end_matches('/')
+    };
+    let key = config.whisper_cloud_api_key.trim();
+    if key.is_empty() {
+        return Err("Whisper Cloud API Key is required".to_string());
+    }
+    let endpoint = format!("{base}/models");
+    let res = reqwest::Client::new()
+        .get(&endpoint)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+    let model = if config.whisper_cloud_model.trim().is_empty() {
+        "whisper-large-v3-turbo"
+    } else {
+        config.whisper_cloud_model.trim()
+    };
+    Ok(format!("Connected ({model})"))
+}
+
+async fn transcribe_chunk_cloud(
+    config: &AppConfig,
+    chunk_path: &Path,
+    whisper_lang: &str,
+    offset_ms: u64,
+) -> Result<Vec<SubtitleCue>, String> {
+    let base = if config.whisper_cloud_base_url.trim().is_empty() {
+        "https://api.groq.com/openai/v1"
+    } else {
+        config.whisper_cloud_base_url.trim().trim_end_matches('/')
+    };
+    let key = config.whisper_cloud_api_key.trim();
+    if key.is_empty() {
+        return Err("Whisper Cloud API Key is required (configure in AI & Translate)".to_string());
+    }
+    let model = if config.whisper_cloud_model.trim().is_empty() {
+        "whisper-large-v3-turbo"
+    } else {
+        config.whisper_cloud_model.trim()
+    };
+    let bytes = fs::read(chunk_path).map_err(|e| format!("Failed to read audio chunk: {e}"))?;
+    let file_name = chunk_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("chunk.mp3")
+        .to_string();
+    let endpoint = format!("{base}/audio/transcriptions");
+    let client = reqwest::Client::new();
+    let delays = [2000_u64, 4000, 8000];
+    let mut last_err = String::new();
+
+    for attempt in 0..=delays.len() {
+        let part = reqwest::multipart::Part::bytes(bytes.clone())
+            .file_name(file_name.clone())
+            .mime_str("audio/mpeg")
+            .map_err(|e| e.to_string())?;
+        let mut form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("model", model.to_string())
+            .text("response_format", "verbose_json");
+        if !whisper_lang.is_empty() && whisper_lang != "auto" {
+            form = form.text("language", whisper_lang.to_string());
+        }
+
+        let res = client
+            .post(&endpoint)
+            .bearer_auth(key)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        if status.is_success() {
+            let parsed: CloudWhisperResponse = serde_json::from_str(&body)
+                .map_err(|e| format!("Invalid Whisper Cloud JSON: {e}"))?;
+            let mut cues = Vec::new();
+            for seg in parsed.segments {
+                let text = seg.text.trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                let start_ms = offset_ms + (seg.start.max(0.0) * 1000.0) as u64;
+                let end_ms = offset_ms + (seg.end.max(seg.start + 0.2) * 1000.0) as u64;
+                cues.push(SubtitleCue {
+                    start_ms,
+                    end_ms,
+                    original: text,
+                    translated: String::new(),
+                });
+            }
+            if cues.is_empty() && !parsed.text.trim().is_empty() {
+                cues.push(SubtitleCue {
+                    start_ms: offset_ms,
+                    end_ms: offset_ms + 10_000,
+                    original: parsed.text.trim().to_string(),
+                    translated: String::new(),
+                });
+            }
+            return Ok(cues);
+        }
+
+        last_err = format!("Whisper Cloud HTTP {status}: {body}");
+        let retryable = status.as_u16() == 429 || status.as_u16() == 503;
+        if retryable && attempt < delays.len() {
+            tokio::time::sleep(std::time::Duration::from_millis(delays[attempt])).await;
+            continue;
+        }
+        return Err(last_err);
+    }
+    Err(last_err)
 }
 
 fn parse_chunk_index(path: &Path) -> Option<usize> {
@@ -140,22 +279,66 @@ fn build_prev_context(translated_all: &[SubtitleCue]) -> String {
     )
 }
 
+fn contains_cjk_or_kana(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(
+            c as u32,
+            0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
+        )
+    })
+}
+
+fn target_allows_cjk(target_lang: &str) -> bool {
+    let low = target_lang.to_lowercase();
+    low.contains("chinese")
+        || low.contains("japanese")
+        || low.contains("korean")
+        || low == "zh"
+        || low == "ja"
+        || low == "ko"
+}
+
+fn needs_translation_retry(original: &str, translated: &str, target_lang: &str) -> bool {
+    let tr = translated.trim();
+    if tr.is_empty() {
+        return true;
+    }
+    if !target_allows_cjk(target_lang) && contains_cjk_or_kana(tr) {
+        return true;
+    }
+    let orig = original.trim();
+    if tr == orig && (contains_cjk_or_kana(orig) || orig.chars().count() > 4) {
+        return true;
+    }
+    false
+}
+
 async fn translate_indexed_subset(
     cfg: &AppConfig,
     items: &[IndexedSubtitleLine],
     prev_context: &str,
     title: Option<&str>,
+    strict_retry: bool,
 ) -> Result<Vec<(usize, String)>, String> {
     let title_ctx = title
         .filter(|t| !t.is_empty())
         .map(|t| format!(" for the video titled \"{}\"", t))
         .unwrap_or_default();
+    let retry_note = if strict_retry {
+        format!(
+            " CRITICAL: Translate EVERY single line into {} — do NOT copy or leave source-language text.",
+            cfg.target_lang
+        )
+    } else {
+        String::new()
+    };
     let prompt = format!(
-        "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent{}).{}\nEach item has an index \"i\" and text \"t\". Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge or skip lines.\n\n{}",
+        "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent{}).{}\nEach item has an index \"i\" and text \"t\". Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge or skip lines.{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
         prev_context,
+        retry_note,
         serde_json::to_string(items).unwrap_or_default()
     );
     let reply = call_llm(cfg, &prompt).await?;
@@ -202,7 +385,7 @@ async fn translate_batch_exact(
         })
         .collect();
 
-    if let Ok(pairs) = translate_indexed_subset(cfg, &items, prev_context, title).await {
+    if let Ok(pairs) = translate_indexed_subset(cfg, &items, prev_context, title, false).await {
         for (idx, tr) in pairs {
             if idx < batch.len() {
                 batch[idx].translated = tr;
@@ -210,26 +393,29 @@ async fn translate_batch_exact(
         }
     } else {
         // Propagate hard API errors (e.g. 429 / auth)
-        let _ = translate_indexed_subset(cfg, &items, prev_context, title).await?;
+        let _ = translate_indexed_subset(cfg, &items, prev_context, title, false).await?;
     }
 
-    let missing: Vec<IndexedSubtitleLine> = batch
-        .iter()
-        .enumerate()
-        .filter(|(_, c)| c.translated.is_empty())
-        .map(|(i, c)| IndexedSubtitleLine {
-            i,
-            t: c.original.clone(),
-        })
-        .collect();
+    for round in 0..2 {
+        let missing: Vec<IndexedSubtitleLine> = batch
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| needs_translation_retry(&c.original, &c.translated, &cfg.target_lang))
+            .map(|(i, c)| IndexedSubtitleLine {
+                i,
+                t: c.original.clone(),
+            })
+            .collect();
 
-    if !missing.is_empty() {
-        // If too many lines failed/missed in a large batch, split into smaller sub-batches; otherwise retry missing indices
-        let chunk_size = if missing.len() > 12 { 15 } else { missing.len() };
+        if missing.is_empty() {
+            break;
+        }
+        let max_chunk = if round == 0 { 15 } else { 8 };
+        let chunk_size = missing.len().min(max_chunk).max(1);
         for sub in missing.chunks(chunk_size) {
-            if let Ok(pairs) = translate_indexed_subset(cfg, sub, prev_context, title).await {
+            if let Ok(pairs) = translate_indexed_subset(cfg, sub, prev_context, title, true).await {
                 for (idx, tr) in pairs {
-                    if idx < batch.len() {
+                    if idx < batch.len() && !tr.trim().is_empty() {
                         batch[idx].translated = tr;
                     }
                 }
@@ -587,20 +773,35 @@ where
         return Err("No YouTube captions found (and whisper.cpp fallback is disabled).".to_string());
     }
 
-    let whisper = find_binary("whisper-cli", bin_dir)
-        .or_else(|| find_binary("whisper", bin_dir))
-        .ok_or_else(|| {
-            let _ = fs::remove_dir_all(&tmp_dir);
-            "No YouTube captions found. Install whisper.cpp (brew install whisper-cpp) for audio transcription.".to_string()
-        })?;
+    let is_cloud = config.whisper_mode == "cloud";
+    if is_cloud && config.whisper_cloud_api_key.trim().is_empty() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err("Whisper Cloud API Key is required (configure in AI & Translate)".to_string());
+    }
+
+    let whisper = if is_cloud {
+        None
+    } else {
+        Some(
+            find_binary("whisper-cli", bin_dir)
+                .or_else(|| find_binary("whisper", bin_dir))
+                .ok_or_else(|| {
+                    let _ = fs::remove_dir_all(&tmp_dir);
+                    "No YouTube captions found. Install whisper.cpp (brew install whisper-cpp) for audio transcription.".to_string()
+                })?,
+        )
+    };
 
     let ffmpeg = find_binary("ffmpeg", bin_dir)
         .ok_or_else(|| "ffmpeg is required for whisper transcription".to_string())?;
     let mut chunk_files = if existing_raw.is_some() {
-        list_chunk_wavs(&tmp_dir)
+        list_chunk_audio(&tmp_dir, is_cloud)
     } else {
         Vec::new()
     };
+
+    let seg_seconds = if is_cloud { "1200" } else { "1800" };
+    let seg_pattern = tmp_dir.join(if is_cloud { "chunk_%03d.mp3" } else { "chunk_%03d.wav" });
 
     if chunk_files.is_empty() {
         let audio_raw = tmp_dir.join("audio.m4a");
@@ -649,26 +850,32 @@ where
             .await
             .map_err(|e| format!("Failed to download audio: {e}"))?;
 
-        let seg_pattern = tmp_dir.join("chunk_%03d.wav");
         let mut drive_fallback_ok = false;
 
         if dl_out.status.success() && audio_raw.is_file() {
             on_progress(20, "Preparing audio chunks...".to_string());
+            let mut ff_args = vec![
+                "-y".to_string(),
+                "-i".to_string(),
+                audio_raw.to_string_lossy().to_string(),
+                "-vn".to_string(),
+                "-ar".to_string(),
+                "16000".to_string(),
+                "-ac".to_string(),
+                "1".to_string(),
+            ];
+            if is_cloud {
+                ff_args.extend(["-b:a".to_string(), "48k".to_string()]);
+            }
+            ff_args.extend([
+                "-f".to_string(),
+                "segment".to_string(),
+                "-segment_time".to_string(),
+                seg_seconds.to_string(),
+                seg_pattern.to_string_lossy().to_string(),
+            ]);
             let ff_out = Command::new(&ffmpeg)
-                .args([
-                    "-y",
-                    "-i",
-                    &audio_raw.to_string_lossy(),
-                    "-ar",
-                    "16000",
-                    "-ac",
-                    "1",
-                    "-f",
-                    "segment",
-                    "-segment_time",
-                    "1800",
-                    &seg_pattern.to_string_lossy(),
-                ])
+                .args(&ff_args)
                 .output()
                 .await
                 .map_err(|e| format!("ffmpeg failed: {e}"))?;
@@ -676,7 +883,7 @@ where
             let _ = fs::remove_file(&audio_raw);
             if !ff_out.status.success() {
                 let _ = fs::remove_dir_all(&tmp_dir);
-                return Err("Failed to convert audio to 16kHz WAV chunks".to_string());
+                return Err("Failed to convert audio chunks".to_string());
             }
         } else {
             let _ = fs::remove_file(&audio_raw);
@@ -692,26 +899,28 @@ where
             // Fallback: if this video is already saved on Google Drive, extract audio from local stream
             let stream_url = format!("http://127.0.0.1:{}/stream/{}", config.port, video_id);
             on_progress(15, "YouTube audio blocked, trying Google Drive stream...".to_string());
-            if let Ok(ff_out) = Command::new(&ffmpeg)
-                .args([
-                    "-y",
-                    "-i",
-                    &stream_url,
-                    "-vn",
-                    "-ar",
-                    "16000",
-                    "-ac",
-                    "1",
-                    "-f",
-                    "segment",
-                    "-segment_time",
-                    "1800",
-                    &seg_pattern.to_string_lossy(),
-                ])
-                .output()
-                .await
-            {
-                if ff_out.status.success() && !list_chunk_wavs(&tmp_dir).is_empty() {
+            let mut ff_args = vec![
+                "-y".to_string(),
+                "-i".to_string(),
+                stream_url,
+                "-vn".to_string(),
+                "-ar".to_string(),
+                "16000".to_string(),
+                "-ac".to_string(),
+                "1".to_string(),
+            ];
+            if is_cloud {
+                ff_args.extend(["-b:a".to_string(), "48k".to_string()]);
+            }
+            ff_args.extend([
+                "-f".to_string(),
+                "segment".to_string(),
+                "-segment_time".to_string(),
+                seg_seconds.to_string(),
+                seg_pattern.to_string_lossy().to_string(),
+            ]);
+            if let Ok(ff_out) = Command::new(&ffmpeg).args(&ff_args).output().await {
+                if ff_out.status.success() && !list_chunk_audio(&tmp_dir, is_cloud).is_empty() {
                     drive_fallback_ok = true;
                 }
             }
@@ -722,7 +931,7 @@ where
             }
         }
 
-        chunk_files = list_chunk_wavs(&tmp_dir);
+        chunk_files = list_chunk_audio(&tmp_dir, is_cloud);
         if let Some(ref raw) = existing_raw {
             chunk_files.retain(|p| {
                 let keep = parse_chunk_index(p).unwrap_or(0) >= raw.completed_chunks;
@@ -742,7 +951,7 @@ where
         config.whisper_model.as_str()
     };
     let model_path = whisper_model_path(data_dir, model_name);
-    if !model_path.is_file() {
+    if !is_cloud && !model_path.is_file() {
         let _ = fs::remove_dir_all(&tmp_dir);
         return Err(format!(
             "Whisper model 'ggml-{model_name}.bin' is not downloaded. Go to AI & Translate to download it."
@@ -754,7 +963,7 @@ where
         return Err("No audio chunks produced by ffmpeg".to_string());
     }
 
-    const CHUNK_MS: u64 = 1800 * 1000;
+    let chunk_ms: u64 = if is_cloud { 1200 * 1000 } else { 1800 * 1000 };
     let total_chunks = existing_raw
         .as_ref()
         .map(|r| r.total_chunks)
@@ -793,65 +1002,72 @@ where
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
         let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
         let base_pct = 20 + (((chunk_idx * 75) / total_chunks.max(1)) as u8);
+        let mode_label = if is_cloud { "Whisper Cloud" } else { "Whisper" };
         on_progress(
             base_pct,
-            format!("Whisper chunk {}/{total_chunks} ({base_pct}%)", chunk_idx + 1),
+            format!("{mode_label} chunk {}/{total_chunks} ({base_pct}%)", chunk_idx + 1),
         );
-        let srt_prefix = tmp_dir.join(format!("whisper_out_{chunk_idx:03}"));
-        let wh_out = Command::new(&whisper)
-            .args([
-                "-m",
-                &model_path.to_string_lossy(),
-                "-l",
+        let offset_ms = (chunk_idx as u64) * chunk_ms;
+
+        let mut chunk_cues = if is_cloud {
+            transcribe_chunk_cloud(config, chunk_wav, whisper_lang, offset_ms).await?
+        } else {
+            let whisper_bin = whisper.as_ref().ok_or("whisper-cli missing")?;
+            let srt_prefix = tmp_dir.join(format!("whisper_out_{chunk_idx:03}"));
+            let wh_out = Command::new(whisper_bin)
+                .args([
+                    "-m",
+                    &model_path.to_string_lossy(),
+                    "-l",
+                    whisper_lang,
+                    "-mc",
+                    "0",
+                    "-et",
+                    "2.4",
+                    "-bs",
+                    "1",
+                    "-f",
+                    &chunk_wav.to_string_lossy(),
+                    "-osrt",
+                    "-of",
+                    &srt_prefix.to_string_lossy(),
+                ])
+                .env("PATH", build_env_path(bin_dir))
+                .output()
+                .await
+                .map_err(|e| format!("whisper-cli failed: {e}"))?;
+
+            let srt_path = tmp_dir.join(format!("whisper_out_{chunk_idx:03}.srt"));
+            if !wh_out.status.success() || !srt_path.is_file() {
+                let err = String::from_utf8_lossy(&wh_out.stderr).trim().to_string();
+                return Err(if err.is_empty() {
+                    "Whisper transcription failed".to_string()
+                } else {
+                    err
+                });
+            }
+
+            let srt_raw = fs::read_to_string(&srt_path).unwrap_or_default();
+            let mut raw_chunk_cues = Vec::new();
+            for mut cue in parse_vtt_or_srt(&srt_raw) {
+                cue.start_ms += offset_ms;
+                cue.end_ms += offset_ms;
+                raw_chunk_cues.push(cue);
+            }
+            repair_whisper_chunk_cues(
+                raw_chunk_cues,
+                chunk_wav,
+                offset_ms,
+                &tmp_dir,
+                chunk_idx,
+                whisper_bin,
+                &ffmpeg,
+                &model_path,
                 whisper_lang,
-                "-mc",
-                "0",
-                "-et",
-                "2.4",
-                "-bs",
-                "1",
-                "-f",
-                &chunk_wav.to_string_lossy(),
-                "-osrt",
-                "-of",
-                &srt_prefix.to_string_lossy(),
-            ])
-            .env("PATH", build_env_path(bin_dir))
-            .output()
+                bin_dir,
+            )
             .await
-            .map_err(|e| format!("whisper-cli failed: {e}"))?;
-
-        let srt_path = tmp_dir.join(format!("whisper_out_{chunk_idx:03}.srt"));
-        if !wh_out.status.success() || !srt_path.is_file() {
-            let err = String::from_utf8_lossy(&wh_out.stderr).trim().to_string();
-            return Err(if err.is_empty() {
-                "Whisper transcription failed".to_string()
-            } else {
-                err
-            });
-        }
-
-        let srt_raw = fs::read_to_string(&srt_path).unwrap_or_default();
-        let offset_ms = (chunk_idx as u64) * CHUNK_MS;
-        let mut raw_chunk_cues = Vec::new();
-        for mut cue in parse_vtt_or_srt(&srt_raw) {
-            cue.start_ms += offset_ms;
-            cue.end_ms += offset_ms;
-            raw_chunk_cues.push(cue);
-        }
-        let mut chunk_cues = repair_whisper_chunk_cues(
-            raw_chunk_cues,
-            chunk_wav,
-            offset_ms,
-            &tmp_dir,
-            chunk_idx,
-            &whisper,
-            &ffmpeg,
-            &model_path,
-            whisper_lang,
-            bin_dir,
-        )
-        .await;
+        };
         raw_all.extend(chunk_cues.clone());
         let completed_chunks = chunk_idx + 1;
         save_raw_cache(

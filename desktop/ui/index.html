@@ -211,34 +211,73 @@
             <input id="preferWhisperInput" type="checkbox" />
           </label>
 
-          <div class="sub-box">
-            <div>
-              <div class="sub-title">whisper-cli Engine</div>
-              <div id="whisperCliStatus" class="muted">Checking...</div>
+          <div class="seg-tabs">
+            <button id="whisperModeLocalBtn" class="seg-btn active" type="button">🖥 Local (whisper-cli)</button>
+            <button id="whisperModeCloudBtn" class="seg-btn" type="button">☁️ Cloud API (Groq / OpenAI)</button>
+          </div>
+
+          <div id="whisperLocalPanel" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="sub-box">
+              <div>
+                <div class="sub-title">whisper-cli Engine</div>
+                <div id="whisperCliStatus" class="muted">Checking...</div>
+              </div>
+              <div class="btn-group">
+                <button id="whisperCliInstallBtn" class="btn-primary btn-xs" type="button">Install</button>
+                <button id="whisperCliRemoveBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+              </div>
             </div>
-            <div class="btn-group">
-              <button id="whisperCliInstallBtn" class="btn-primary btn-xs" type="button">Install</button>
-              <button id="whisperCliRemoveBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+
+            <div class="sub-box-col">
+              <div class="quality-row">
+                <span class="sub-title">Whisper Model</span>
+                <select id="whisperModelSelect">
+                  <option value="tiny">tiny (~75 MB · Fastest)</option>
+                  <option value="base">base (~142 MB · Balanced)</option>
+                  <option value="small">small (~466 MB · Recommended)</option>
+                  <option value="medium">medium (~1.5 GB · High Accuracy)</option>
+                  <option value="large-v3-turbo-q5_0">large-v3-turbo-q5_0 (~574 MB · Best Value)</option>
+                  <option value="large-v3-turbo">large-v3-turbo FP16 (~1.62 GB · Best Quality)</option>
+                </select>
+              </div>
+              <div class="sub-box-foot">
+                <span id="whisperModelStatus" class="muted">Checking...</span>
+                <div class="btn-group">
+                  <button id="whisperModelDlBtn" class="btn-primary btn-xs" type="button">Download</button>
+                  <button id="whisperModelRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div class="sub-box-col">
-            <div class="quality-row">
-              <span class="sub-title">Whisper Model</span>
-              <select id="whisperModelSelect">
-                <option value="tiny">tiny (~75 MB · Fastest)</option>
-                <option value="base">base (~142 MB · Balanced)</option>
-                <option value="small">small (~466 MB · Recommended)</option>
-                <option value="medium">medium (~1.5 GB · High Accuracy)</option>
-                <option value="large-v3-turbo-q5_0">large-v3-turbo-q5_0 (~574 MB · Best Value)</option>
-                <option value="large-v3-turbo">large-v3-turbo FP16 (~1.62 GB · Best Quality)</option>
-              </select>
+          <div id="whisperCloudPanel" class="hidden" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="preview-text" style="margin-top:0">
+              Groq Free Tier: ~8h audio/day free (no card required). Audio is split into 48kbps MP3 chunks (&lt; 25 MB).
             </div>
-            <div class="sub-box-foot">
-              <span id="whisperModelStatus" class="muted">Checking...</span>
-              <div class="btn-group">
-                <button id="whisperModelDlBtn" class="btn-primary btn-xs" type="button">Download</button>
-                <button id="whisperModelRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+            <div class="sub-box-col">
+              <div class="quality-row">
+                <span class="sub-title">Cloud Provider</span>
+                <select id="whisperCloudProvider">
+                  <option value="groq">Groq (Free · Ultra Fast)</option>
+                  <option value="openai">OpenAI Whisper</option>
+                  <option value="custom">Custom OpenAI-compatible</option>
+                </select>
+              </div>
+              <label class="field" style="margin-bottom:0">
+                <span>Whisper Cloud API Key</span>
+                <input id="whisperCloudKeyInput" type="password" placeholder="gsk_..." />
+              </label>
+              <label class="field" style="margin-bottom:0">
+                <span>Model</span>
+                <input id="whisperCloudModelInput" type="text" placeholder="whisper-large-v3-turbo" />
+              </label>
+              <label class="field" style="margin-bottom:0">
+                <span>Base URL</span>
+                <input id="whisperCloudBaseUrlInput" type="text" placeholder="https://api.groq.com/openai/v1" />
+              </label>
+              <div class="sub-box-foot">
+                <span id="whisperCloudTestMsg" class="muted">Ready</span>
+                <button id="testWhisperCloudBtn" class="btn-ghost btn-xs" type="button">Test Whisper API</button>
               </div>
             </div>
           </div>
@@ -257,7 +296,7 @@
                 <option value="fr">French (Français · fr)</option>
               </select>
             </div>
-            <div class="muted" style="font-size:11px">Auto-detect works for most videos; pick a language if noisy intros confuse detection.</div>
+            <div class="muted" style="font-size:11px">Applies to both Local and Cloud Whisper. Pick a language if noisy intros confuse detection.</div>
           </div>
           <p id="whisperMsg" class="error-text hidden"></p>
         </div>

@@ -71,6 +71,16 @@ pub struct AppConfig {
     pub whisper_model: String,
     #[serde(default = "default_whisper_language")]
     pub whisper_language: String,
+    #[serde(default = "default_whisper_mode")]
+    pub whisper_mode: String,
+    #[serde(default = "default_whisper_cloud_provider")]
+    pub whisper_cloud_provider: String,
+    #[serde(default = "default_whisper_cloud_base_url")]
+    pub whisper_cloud_base_url: String,
+    #[serde(default)]
+    pub whisper_cloud_api_key: String,
+    #[serde(default = "default_whisper_cloud_model")]
+    pub whisper_cloud_model: String,
     #[serde(default)]
     pub prefer_whisper_over_auto_cc: bool,
     #[serde(default)]
@@ -98,6 +108,18 @@ fn default_whisper_model() -> String {
 fn default_whisper_language() -> String {
     "auto".to_string()
 }
+fn default_whisper_mode() -> String {
+    "local".to_string()
+}
+fn default_whisper_cloud_provider() -> String {
+    "groq".to_string()
+}
+fn default_whisper_cloud_base_url() -> String {
+    "https://api.groq.com/openai/v1".to_string()
+}
+fn default_whisper_cloud_model() -> String {
+    "whisper-large-v3-turbo".to_string()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -121,6 +143,11 @@ impl Default for AppConfig {
             use_whisper_fallback: true,
             whisper_model: default_whisper_model(),
             whisper_language: default_whisper_language(),
+            whisper_mode: default_whisper_mode(),
+            whisper_cloud_provider: default_whisper_cloud_provider(),
+            whisper_cloud_base_url: default_whisper_cloud_base_url(),
+            whisper_cloud_api_key: String::new(),
+            whisper_cloud_model: default_whisper_cloud_model(),
             prefer_whisper_over_auto_cc: false,
             embed_subtitles: false,
             max_concurrent: 2,
@@ -146,6 +173,11 @@ pub struct ConfigPatch {
     pub use_whisper_fallback: Option<bool>,
     pub whisper_model: Option<String>,
     pub whisper_language: Option<String>,
+    pub whisper_mode: Option<String>,
+    pub whisper_cloud_provider: Option<String>,
+    pub whisper_cloud_base_url: Option<String>,
+    pub whisper_cloud_api_key: Option<String>,
+    pub whisper_cloud_model: Option<String>,
     pub prefer_whisper_over_auto_cc: Option<bool>,
     pub embed_subtitles: Option<bool>,
     pub max_concurrent: Option<usize>,
@@ -227,6 +259,22 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
         } else {
             clean
         };
+    }
+    if let Some(wm) = patch.whisper_mode {
+        let clean = wm.trim().to_string();
+        cfg.whisper_mode = if clean == "cloud" { "cloud".to_string() } else { "local".to_string() };
+    }
+    if let Some(wcp) = patch.whisper_cloud_provider {
+        cfg.whisper_cloud_provider = wcp.trim().to_string();
+    }
+    if let Some(wcb) = patch.whisper_cloud_base_url {
+        cfg.whisper_cloud_base_url = wcb.trim().trim_end_matches('/').to_string();
+    }
+    if let Some(wck) = patch.whisper_cloud_api_key {
+        cfg.whisper_cloud_api_key = wck.trim().to_string();
+    }
+    if let Some(wcm) = patch.whisper_cloud_model {
+        cfg.whisper_cloud_model = wcm.trim().to_string();
     }
     if let Some(pw) = patch.prefer_whisper_over_auto_cc {
         cfg.prefer_whisper_over_auto_cc = pw;

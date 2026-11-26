@@ -86,6 +86,12 @@ async fn test_ai_connection(state: State<'_, AppState>) -> Result<String, String
 }
 
 #[tauri::command]
+async fn test_whisper_cloud(state: State<'_, AppState>) -> Result<String, String> {
+    let cfg = load_config(&state.data_dir);
+    translate::test_whisper_cloud_connection(&cfg).await
+}
+
+#[tauri::command]
 async fn list_ai_models_cmd(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let cfg = load_config(&state.data_dir);
     translate::list_ai_models(&cfg).await
@@ -433,6 +439,7 @@ pub fn run() {
             sync_cloud_ids,
             download_missing_tools,
             test_ai_connection,
+            test_whisper_cloud,
             list_ai_models_cmd,
             install_whisper_cli_cmd,
             remove_whisper_cli_cmd,

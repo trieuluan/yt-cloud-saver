@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.15] - 2026-11-26
+
+### Added & Improved
+- **Whisper Cloud API Support (Groq Free / OpenAI / Custom):** Added Local vs. Cloud API mode toggle in **AI & Translate**, defaulting to Groq (`whisper-large-v3-turbo`, free ~8h audio/day) with 20-minute 48kbps MP3 chunking (< 25 MB), `Test Whisper API`, and shared `Spoken Language` support.
+- **Strict Untranslated/CJK Detection & 2-Pass Retry:** Automatically detects when a lightweight model copies source text or leaves CJK/Kana characters untranslated and runs up to 2 targeted retry passes in smaller sub-batches.
+
 ## [1.2.14] - 2026-11-26
 
 ### Fixed & Improved

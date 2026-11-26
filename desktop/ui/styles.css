@@ -451,6 +451,32 @@ select:focus {
   margin-top: 2px;
 }
 
+.seg-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #0d1017;
+  border: 1px solid #242934;
+  border-radius: 9px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.seg-btn {
+  border: none;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: #8b95a7;
+}
+
+.seg-btn.active {
+  background: #1f2737;
+  color: #ffffff;
+}
+
 .export-dropdown.open .export-menu {
   display: flex;
 }

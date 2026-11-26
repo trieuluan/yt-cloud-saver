@@ -63,6 +63,16 @@ const whisperCliInstallBtn = document.getElementById('whisperCliInstallBtn');
 const whisperCliRemoveBtn = document.getElementById('whisperCliRemoveBtn');
 const whisperModelSelect = document.getElementById('whisperModelSelect');
 const whisperLangSelect = document.getElementById('whisperLangSelect');
+const whisperModeLocalBtn = document.getElementById('whisperModeLocalBtn');
+const whisperModeCloudBtn = document.getElementById('whisperModeCloudBtn');
+const whisperLocalPanel = document.getElementById('whisperLocalPanel');
+const whisperCloudPanel = document.getElementById('whisperCloudPanel');
+const whisperCloudProvider = document.getElementById('whisperCloudProvider');
+const whisperCloudKeyInput = document.getElementById('whisperCloudKeyInput');
+const whisperCloudModelInput = document.getElementById('whisperCloudModelInput');
+const whisperCloudBaseUrlInput = document.getElementById('whisperCloudBaseUrlInput');
+const testWhisperCloudBtn = document.getElementById('testWhisperCloudBtn');
+const whisperCloudTestMsg = document.getElementById('whisperCloudTestMsg');
 const whisperModelStatus = document.getElementById('whisperModelStatus');
 const whisperModelDlBtn = document.getElementById('whisperModelDlBtn');
 const whisperModelRmBtn = document.getElementById('whisperModelRmBtn');
@@ -104,6 +114,17 @@ const WHISPER_SIZES = {
   'large-v3-turbo-q5_0': '574 MB',
   'large-v3-turbo': '1.62 GB',
 };
+
+let currentWhisperMode = 'local';
+
+function renderWhisperMode(mode) {
+  currentWhisperMode = mode === 'cloud' ? 'cloud' : 'local';
+  const isCloud = currentWhisperMode === 'cloud';
+  whisperModeLocalBtn.classList.toggle('active', !isCloud);
+  whisperModeCloudBtn.classList.toggle('active', isCloud);
+  whisperLocalPanel.classList.toggle('hidden', isCloud);
+  whisperCloudPanel.classList.toggle('hidden', !isCloud);
+}
 
 function renderWhisperUI(whisper) {
   if (whisper) {
@@ -381,6 +402,11 @@ async function persistSettings() {
         useWhisperFallback: whisperFallbackInput.checked,
         whisperModel: whisperModelSelect.value,
         whisperLanguage: whisperLangSelect.value,
+        whisperMode: currentWhisperMode,
+        whisperCloudProvider: whisperCloudProvider.value,
+        whisperCloudBaseUrl: whisperCloudBaseUrlInput.value.trim(),
+        whisperCloudApiKey: whisperCloudKeyInput.value.trim(),
+        whisperCloudModel: whisperCloudModelInput.value.trim(),
         preferWhisperOverAutoCc: preferWhisperInput.checked,
         embedSubtitles: embedSubtitlesInput.checked,
       },
@@ -446,6 +472,11 @@ async function loadState() {
       whisperFallbackInput.checked = Boolean(data.config.useWhisperFallback);
       whisperModelSelect.value = data.config.whisperModel || 'small';
       whisperLangSelect.value = data.config.whisperLanguage || 'auto';
+      renderWhisperMode(data.config.whisperMode || 'local');
+      whisperCloudProvider.value = data.config.whisperCloudProvider || 'groq';
+      whisperCloudBaseUrlInput.value = data.config.whisperCloudBaseUrl || 'https://api.groq.com/openai/v1';
+      whisperCloudKeyInput.value = data.config.whisperCloudApiKey || '';
+      whisperCloudModelInput.value = data.config.whisperCloudModel || 'whisper-large-v3-turbo';
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
       embedSubtitlesInput.checked = Boolean(data.config.embedSubtitles);
       updatePathPreview();
@@ -480,6 +511,43 @@ provBtns.forEach((btn) => {
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
 [targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', persistSettings));
+[whisperCloudKeyInput, whisperCloudModelInput, whisperCloudBaseUrlInput].forEach((el) => el.addEventListener('change', persistSettings));
+
+whisperModeLocalBtn.addEventListener('click', () => {
+  renderWhisperMode('local');
+  persistSettings();
+});
+
+whisperModeCloudBtn.addEventListener('click', () => {
+  renderWhisperMode('cloud');
+  persistSettings();
+});
+
+whisperCloudProvider.addEventListener('change', () => {
+  const p = whisperCloudProvider.value;
+  if (p === 'groq') {
+    whisperCloudBaseUrlInput.value = 'https://api.groq.com/openai/v1';
+    whisperCloudModelInput.value = 'whisper-large-v3-turbo';
+  } else if (p === 'openai') {
+    whisperCloudBaseUrlInput.value = 'https://api.openai.com/v1';
+    whisperCloudModelInput.value = 'whisper-1';
+  }
+  persistSettings();
+});
+
+testWhisperCloudBtn.addEventListener('click', async () => {
+  whisperCloudTestMsg.textContent = 'Testing...';
+  whisperCloudTestMsg.className = 'muted';
+  await persistSettings();
+  try {
+    const msg = await invoke('test_whisper_cloud');
+    whisperCloudTestMsg.textContent = `✓ ${msg}`;
+    whisperCloudTestMsg.className = 'tool-ok';
+  } catch (err) {
+    whisperCloudTestMsg.textContent = String(err);
+    whisperCloudTestMsg.className = 'error-text';
+  }
+});
 
 whisperModelSelect.addEventListener('change', () => {
   renderWhisperUI();
