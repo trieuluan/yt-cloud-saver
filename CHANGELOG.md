@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.24] - 2026-11-26
+
+### Improved
+- **Natural Spoken Subtitle Prompt & 12-Cue Context:** Expanded previous-context window from 6 to 12 lines and upgraded translation instructions to prioritize natural spoken idioms, strict pronoun/character-name consistency, and automatic correction of ASR/Whisper homophone typos.
+
 ## [1.2.23] - 2026-11-26
 
 ### Improved

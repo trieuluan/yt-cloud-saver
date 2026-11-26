@@ -311,13 +311,13 @@ fn build_prev_context(translated_all: &[SubtitleCue]) -> String {
     if translated_all.is_empty() {
         return String::new();
     }
-    let tail_start = translated_all.len().saturating_sub(6);
+    let tail_start = translated_all.len().saturating_sub(12);
     let pairs: Vec<String> = translated_all[tail_start..]
         .iter()
         .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
         .collect();
     format!(
-        "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
+        "\nPrevious context (match character names, pronouns, and tone; DO NOT include in output):\n{}\n",
         pairs.join("\n")
     )
 }
@@ -385,10 +385,11 @@ async fn translate_indexed_subset(
         String::new()
     };
     let prompt = format!(
-        "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent{}).{}\nEach item has an index \"i\" and text \"t\". Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge or skip lines.{}\n\n{}",
+        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation).\n2. Keep character names, relationships, and pronouns strictly consistent with the previous context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g., misheard character names or slang like 风唇→丰唇, 不生字→不识字); infer the intended meaning from context and translate naturally.\n4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge, split, or skip lines.{}{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
+        cfg.target_lang,
         prev_context,
         retry_note,
         serde_json::to_string(items).unwrap_or_default()
