@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.35] - 2026-11-27
+
+### Fixed
+- **Multi-Voice Popup Polish:** Fixed `Auto Multi-Voice` checkbox alignment & label wrapping, shortened `Giọng Nữ (F)` / `Giọng Nam (M)` dropdown labels to avoid clipping, and added the secondary character rotation note.
+
 ## [1.2.34] - 2026-11-27
 
 ### Added

@@ -233,8 +233,9 @@ function renderDubEngine(eng, selectedVoice) {
           ...customVieneuVoices.map((v) => ({ value: `vieneu:custom:${v.id}`, label: `🎙 ${v.name}` })),
           ...VIENEU_PRESET_VOICES.filter((v) => v.value !== 'vieneu:default'),
         ];
-    dubFemaleSelect.innerHTML = fOpts.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
-    dubMaleSelect.innerHTML = mOpts.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    const shortLabel = (s) => s.replace(/^VieNeu · /, '');
+    dubFemaleSelect.innerHTML = fOpts.map((o) => `<option value="${o.value}">${shortLabel(o.label)}</option>`).join('');
+    dubMaleSelect.innerHTML = mOpts.map((o) => `<option value="${o.value}">${shortLabel(o.label)}</option>`).join('');
     dubFemaleSelect.value = fOpts.some((o) => o.value === subStyle.dubFemaleVoice)
       ? subStyle.dubFemaleVoice
       : fOpts[0]?.value || '';
