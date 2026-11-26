@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.17] - 2026-11-26
+
+### Fixed
+- **Extension `manifest.json` Syntax Fix:** Fixed an accidental extra comma on the `"version"` line in `extension/manifest.json` that prevented Chrome from loading the unpacked extension.
+
 ## [1.2.16] - 2026-11-26
 
 ### Improved
