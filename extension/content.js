@@ -733,6 +733,8 @@
       resumeDubbingIfSameCue(video, curIdx);
     });
     video.addEventListener('seeking', () => {
+      preparedFromIdx = -1;
+      preparedUpToIdx = -1;
       if (dubEnabled) stopDubbingSpeech(video, true);
     });
     video.addEventListener('ended', () => {
@@ -753,6 +755,30 @@
     return Math.min(3.5, Math.max(baseRate, fitRate));
   }
 
+  function hasSpeakableText(text) {
+    return Boolean(text && /[\p{L}\p{N}]/u.test(text));
+  }
+
+  function preloadAudioMeta(audioUrl) {
+    return new Promise((resolve) => {
+      const a = new Audio();
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve({
+          audioUrl,
+          duration: Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0,
+        });
+      };
+      a.addEventListener('loadedmetadata', finish, { once: true });
+      a.addEventListener('error', finish, { once: true });
+      a.preload = 'metadata';
+      a.src = audioUrl;
+      setTimeout(finish, 180);
+    });
+  }
+
   function fetchEdgeTtsAudio(text, voice, rateStr) {
     const key = `${voice}|${rateStr}|${text}`;
     if (ttsAudioCache.has(key)) return ttsAudioCache.get(key);
@@ -760,12 +786,12 @@
       try {
         const res = await sendBg('SYNTH_TTS', { text, voice, rate: rateStr });
         if (!res?.audioUrl) throw new Error('Empty Edge TTS audio');
-        return res.audioUrl;
+        return await preloadAudioMeta(res.audioUrl);
       } catch (firstErr) {
         await new Promise((r) => setTimeout(r, 150));
         const res2 = await sendBg('SYNTH_TTS', { text, voice, rate: rateStr });
         if (!res2?.audioUrl) throw firstErr;
-        return res2.audioUrl;
+        return await preloadAudioMeta(res2.audioUrl);
       }
     };
     const promise = runFetch();
@@ -790,25 +816,28 @@
     }
   }
 
+  let preparedFromIdx = -1;
   let preparedUpToIdx = -1;
   let prepareBatchInFlight = false;
-  async function prepareBatchAhead(startIdx, count = 20) {
+  async function prepareBatchAhead(startIdx, count = 24) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
     if (voice === 'browser' || !subBundle?.cues?.length) return;
-    if (prepareBatchInFlight || startIdx + 6 < preparedUpToIdx) return;
+    if (prepareBatchInFlight) return;
+    if (preparedFromIdx >= 0 && startIdx >= preparedFromIdx && startIdx + 6 < preparedUpToIdx) return;
 
     const from = Math.max(0, startIdx);
     const to = Math.min(subBundle.cues.length, from + count);
     const texts = [];
     for (let i = from; i < to; i += 1) {
       const t = subBundle.cues[i]?.translated?.trim();
-      if (t) texts.push(t);
+      if (hasSpeakableText(t)) texts.push(t);
     }
     if (!texts.length) return;
 
     prepareBatchInFlight = true;
     try {
       await sendBg('PREPARE_TTS', { texts, voice, rate: '+15%' }).catch(() => {});
+      preparedFromIdx = preparedFromIdx >= 0 && startIdx >= preparedFromIdx ? preparedFromIdx : from;
       preparedUpToIdx = Math.max(preparedUpToIdx, to);
     } finally {
       prepareBatchInFlight = false;
@@ -820,17 +849,18 @@
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
     if (voice === 'browser' || !subBundle?.cues?.length || prefetchInFlight) return;
     pruneRamCacheWindow(idx, voice, '+15%');
-    prepareBatchAhead(idx + 4, 20);
+    prepareBatchAhead(idx + 1, 24);
     prefetchInFlight = true;
     try {
-      for (let offset = 1; offset <= 5; offset += 1) {
-        if (!dubEnabled) break;
+      const tasks = [];
+      for (let offset = 1; offset <= 4; offset += 1) {
         const nextCue = subBundle.cues[idx + offset];
         const nextText = nextCue?.translated?.trim();
-        if (nextText) {
-          await fetchEdgeTtsAudio(nextText, voice, '+15%').catch(() => {});
+        if (hasSpeakableText(nextText)) {
+          tasks.push(fetchEdgeTtsAudio(nextText, voice, '+15%').catch(() => {}));
         }
       }
+      if (tasks.length) await Promise.all(tasks);
     } finally {
       prefetchInFlight = false;
     }
@@ -873,7 +903,7 @@
   async function speakCue(cue, video, idx) {
     if (!cue?.translated) return;
     const text = cue.translated.trim();
-    if (!text) return;
+    if (!hasSpeakableText(text)) return;
 
     const mySeq = ++speakSeq;
     if (speakTimer) {
@@ -897,7 +927,7 @@
     prefetchNextCues(idx);
 
     try {
-      const audioUrl = await fetchEdgeTtsAudio(text, voice, '+15%');
+      const { audioUrl, duration } = await fetchEdgeTtsAudio(text, voice, '+15%');
       if (mySeq !== speakSeq || !dubEnabled || video.paused) {
         if (!dubAudioEl || dubAudioEl.paused) restoreVideoVolume(video);
         return;
@@ -913,33 +943,16 @@
         if (mySeq === speakSeq) restoreVideoVolume(video);
       };
       dubAudioEl.src = audioUrl;
-      await new Promise((resolve) => {
-        if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
-          resolve();
-          return;
-        }
-        const onMeta = () => {
-          dubAudioEl.removeEventListener('loadedmetadata', onMeta);
-          dubAudioEl.removeEventListener('error', onMeta);
-          resolve();
-        };
-        dubAudioEl.addEventListener('loadedmetadata', onMeta, { once: true });
-        dubAudioEl.addEventListener('error', onMeta, { once: true });
-        setTimeout(onMeta, 120);
-      });
-      if (mySeq !== speakSeq || !dubEnabled || video.paused) {
-        if (!dubAudioEl || dubAudioEl.paused) restoreVideoVolume(video);
-        return;
-      }
 
       const ytRate = Math.max(0.5, Number(video.playbackRate) || 1);
       const userSpeed = Math.max(0.7, Math.min(2.0, Number(subStyle.dubSpeed) || 1.0));
       const baseAudioRate = (userSpeed * ytRate) / 1.15;
       let exactAudioRate = baseAudioRate;
-      if (Number.isFinite(dubAudioEl.duration) && dubAudioEl.duration > 0) {
+      const audioDur = duration > 0 ? duration : (Number.isFinite(dubAudioEl.duration) ? dubAudioEl.duration : 0);
+      if (audioDur > 0) {
         const remCueMs = Math.max(300, (cue.endMs || 0) - video.currentTime * 1000);
         const availSec = remCueMs / 1000 / ytRate;
-        const fitAudioRate = dubAudioEl.duration / Math.max(0.25, availSec * 0.96);
+        const fitAudioRate = audioDur / Math.max(0.25, availSec * 0.96);
         exactAudioRate = Math.max(baseAudioRate, fitAudioRate);
       } else {
         exactAudioRate = computeDubRate(text, cue, video) / 1.15;

@@ -337,6 +337,34 @@ pub async fn synthesize_edge_tts(
         }
     }
 
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(6),
+            synthesize_edge_tts_once(clean_text, &voice_name, &rate_str),
+        )
+        .await
+        {
+            Ok(Ok(audio_bytes)) => {
+                let _ = fs::create_dir_all(&cache_dir);
+                let _ = fs::write(&cache_path, &audio_bytes);
+                return Ok(audio_bytes);
+            }
+            Ok(Err(e)) => last_err = e,
+            Err(_) => last_err = "Edge TTS request timed out".to_string(),
+        }
+        if attempt == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+    }
+    Err(last_err)
+}
+
+async fn synthesize_edge_tts_once(
+    clean_text: &str,
+    voice_name: &str,
+    rate_str: &str,
+) -> Result<Vec<u8>, String> {
     let conn_id = Uuid::new_v4().simple().to_string();
     let sec_ms_gec = generate_sec_ms_gec_v2();
     let ws_url = format!(
@@ -417,9 +445,6 @@ pub async fn synthesize_edge_tts(
     if audio_bytes.is_empty() {
         return Err("Edge TTS returned empty audio".to_string());
     }
-
-    let _ = fs::create_dir_all(&cache_dir);
-    let _ = fs::write(&cache_path, &audio_bytes);
 
     Ok(audio_bytes)
 }

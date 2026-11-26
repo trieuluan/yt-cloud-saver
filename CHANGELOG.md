@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.20] - 2026-11-26
+
+### Fixed & Improved
+- **Reliable AI Dubbing Playback:** Added 6s WebSocket timeout + automatic retry in `synthesize_edge_tts`, parallel 4-cue prefetching, audio metadata pre-warming for instant playback, seek-aware batch pre-buffering (`preparedFromIdx`/`preparedUpToIdx` reset), and speakable-text filtering so punctuation-only cues never interrupt active speech.
+
 ## [1.2.19] - 2026-11-26
 
 ### Improved
