@@ -1227,15 +1227,61 @@ where
         );
         let offset_ms = (chunk_idx as u64) * chunk_ms;
 
+        let latest_cfg = load_config(data_dir);
+        let needs_pcm_wav = is_cloud
+            && (config.skip_music_whisper || latest_cfg.use_speaker_diarization);
+        let temp_pcm_wav = if needs_pcm_wav {
+            let p = tmp_dir.join(format!("chunk_{chunk_idx:03}_pcm.wav"));
+            let ok = Command::new(&ffmpeg)
+                .args([
+                    "-y",
+                    "-i",
+                    &chunk_wav.to_string_lossy(),
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    &p.to_string_lossy(),
+                ])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if ok && p.is_file() {
+                Some(p)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let wav_for_ort = temp_pcm_wav.as_deref().unwrap_or(chunk_wav);
+
         if config.skip_music_whisper {
             if crate::yamnet::ensure_yamnet_model(data_dir).await.is_ok() {
                 let d_dir = data_dir.to_path_buf();
-                let w_path = chunk_wav.to_path_buf();
+                let w_path = wav_for_ort.to_path_buf();
                 let sens = config.yamnet_sensitivity.clone();
-                let _ = tokio::task::spawn_blocking(move || {
+                let muted = tokio::task::spawn_blocking(move || {
                     crate::yamnet::filter_music_and_singing_wav(&d_dir, &w_path, &sens)
                 })
-                .await;
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(0);
+                if muted > 0 && temp_pcm_wav.is_some() {
+                    let _ = Command::new(&ffmpeg)
+                        .args([
+                            "-y",
+                            "-i",
+                            &wav_for_ort.to_string_lossy(),
+                            "-b:a",
+                            "48k",
+                            &chunk_wav.to_string_lossy(),
+                        ])
+                        .output()
+                        .await;
+                }
             }
         }
 
@@ -1316,7 +1362,7 @@ where
         let speaker_hints = if latest_cfg.use_speaker_diarization
             && crate::diarize::ensure_wespeaker_model(data_dir).await.is_ok()
         {
-            match speaker_tracker.diarize_chunk(data_dir, chunk_wav, offset_ms, &chunk_cues) {
+            match speaker_tracker.diarize_chunk(data_dir, wav_for_ort, offset_ms, &chunk_cues) {
                 Ok(pairs) => {
                     let mut hints = Vec::with_capacity(pairs.len());
                     for (i, (hint, code)) in pairs.into_iter().enumerate() {
@@ -1329,12 +1375,23 @@ where
                 }
                 Err(e) => {
                     eprintln!("[diarize] speaker_tracker.diarize_chunk failed: {e}");
+                    if let Ok(mut f) = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(data_dir.join("diarize.log"))
+                    {
+                        use std::io::Write;
+                        let _ = writeln!(f, "chunk {chunk_idx}: err: {e}");
+                    }
                     None
                 }
             }
         } else {
             None
         };
+        if let Some(ref p) = temp_pcm_wav {
+            let _ = fs::remove_file(p);
+        }
         let _ = fs::remove_file(chunk_wav);
 
         raw_all.extend(chunk_cues.clone());

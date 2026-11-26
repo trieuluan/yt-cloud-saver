@@ -343,14 +343,18 @@ impl SpeakerTracker {
             let Some((n_frames, fbank)) = compute_fbank_80(slice) else {
                 continue;
             };
-            let tensor = Tensor::from_array(([1usize, n_frames, 80usize], fbank.into_boxed_slice()))
-                .map_err(|e| format!("Fbank tensor error: {e}"))?;
-            let outputs = session
-                .run(ort::inputs![tensor])
-                .map_err(|e| format!("WeSpeaker inference failed: {e}"))?;
-            let (_, emb_slice) = outputs[0]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| format!("Failed to extract embedding: {e}"))?;
+            if n_frames < 20 {
+                continue;
+            }
+            let Ok(tensor) = Tensor::from_array(([1usize, n_frames, 80usize], fbank.into_boxed_slice())) else {
+                continue;
+            };
+            let Ok(outputs) = session.run(ort::inputs![tensor]) else {
+                continue;
+            };
+            let Ok((_, emb_slice)) = outputs[0].try_extract_tensor::<f32>() else {
+                continue;
+            };
             let mut emb = emb_slice.to_vec();
             if emb.is_empty() {
                 continue;
@@ -478,5 +482,61 @@ mod tests {
             let (shape, _) = outputs[0].try_extract_tensor::<f32>().expect("extract");
             println!("WeSpeaker output shape: {:?}", shape);
         }
+    }
+
+    #[test]
+    fn test_diarize_chunk_with_yamnet_and_wespeaker() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let data_dir = PathBuf::from(home)
+            .join("Library/Application Support/com.louis.yt-cloud-saver");
+        if !wespeaker_model_path(&data_dir).is_file() {
+            return;
+        }
+        let wav_path = std::env::temp_dir().join("ytcs_diarize_e2e_test.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        {
+            let mut w = hound::WavWriter::create(&wav_path, spec).expect("wav");
+            for i in 0..80_000 {
+                let t = i as f32 / 16_000.0;
+                let s = ((2.0 * PI * 180.0 * t).sin() * 8000.0) as i16;
+                w.write_sample(s).unwrap();
+            }
+            w.finalize().unwrap();
+        }
+        if crate::yamnet::yamnet_model_path(&data_dir).is_file() {
+            let muted = crate::yamnet::filter_music_and_singing_wav(&data_dir, &wav_path, "balanced")
+                .expect("yamnet filter");
+            println!("YAMNet muted frames: {muted}");
+        }
+        let cues = vec![
+            SubtitleCue {
+                start_ms: 0,
+                end_ms: 360,
+                original: "short".into(),
+                translated: String::new(),
+                speaker: None,
+            },
+            SubtitleCue {
+                start_ms: 1600,
+                end_ms: 4500,
+                original: "world".into(),
+                translated: String::new(),
+                speaker: None,
+            },
+        ];
+        let mut tracker = SpeakerTracker::new();
+        let pairs = tracker
+            .diarize_chunk(&data_dir, &wav_path, 0, &cues)
+            .expect("diarize_chunk");
+        let _ = fs::remove_file(&wav_path);
+        println!("diarize_chunk pairs: {:?}", pairs);
+        assert!(pairs.iter().any(|(_, code)| code.is_some()));
     }
 }

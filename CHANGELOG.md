@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.39] - 2026-11-27
+
+### Fixed
+- **Cloud Whisper Diarization & YAMNet (MP3 -> WAV):** Decoded Cloud Whisper `.mp3` chunks to temporary 16kHz mono WAV (`chunk_XXX_pcm.wav`) for YAMNet music filtering and WeSpeaker speaker diarization, fixing `Ill-formed WAVE file: no RIFF tag found`.
+- **Per-Cue Resilience & Diagnostics:** Skipped individual failed cues in `diarize_chunk` instead of aborting the entire chunk, and logged chunk-level diarization errors to `diarize.log`.
+
 ## [1.2.38] - 2026-11-27
 
 ### Fixed
