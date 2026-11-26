@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.13] - 2026-11-26
+
+### Fixed & Improved
+- **Google Drive Audio Fallback for Whisper:** When `yt-dlp` cannot download audio from YouTube (e.g. restricted/blocked/deleted video), Whisper now automatically falls back to extracting 16kHz WAV chunks from the video already saved on Google Drive (`/stream/{videoId}`).
+- **Real `yt-dlp` Error Reporting & Safe Re-whisper Backup:** Surfaces the actual `yt-dlp` `ERROR:` line on failure instead of a generic message, and preserves the previous subtitle cache as `.bak` during `Re-whisper + Translate` so it is automatically restored if audio extraction fails.
+
 ## [1.2.12] - 2026-11-26
 
 ### Added & Improved

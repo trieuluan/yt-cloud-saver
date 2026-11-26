@@ -554,38 +554,78 @@ where
             .await
             .map_err(|e| format!("Failed to download audio: {e}"))?;
 
-        if !dl_out.status.success() || !audio_raw.is_file() {
-            let _ = fs::remove_dir_all(&tmp_dir);
-            return Err("Failed to download audio for Whisper".to_string());
-        }
-
-        on_progress(20, "Preparing audio chunks...".to_string());
-
         let seg_pattern = tmp_dir.join("chunk_%03d.wav");
-        let ff_out = Command::new(&ffmpeg)
-            .args([
-                "-y",
-                "-i",
-                &audio_raw.to_string_lossy(),
-                "-ar",
-                "16000",
-                "-ac",
-                "1",
-                "-f",
-                "segment",
-                "-segment_time",
-                "1800",
-                &seg_pattern.to_string_lossy(),
-            ])
-            .output()
-            .await
-            .map_err(|e| format!("ffmpeg failed: {e}"))?;
+        let mut drive_fallback_ok = false;
 
-        if !ff_out.status.success() {
-            let _ = fs::remove_dir_all(&tmp_dir);
-            return Err("Failed to convert audio to 16kHz WAV chunks".to_string());
+        if dl_out.status.success() && audio_raw.is_file() {
+            on_progress(20, "Preparing audio chunks...".to_string());
+            let ff_out = Command::new(&ffmpeg)
+                .args([
+                    "-y",
+                    "-i",
+                    &audio_raw.to_string_lossy(),
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    "-f",
+                    "segment",
+                    "-segment_time",
+                    "1800",
+                    &seg_pattern.to_string_lossy(),
+                ])
+                .output()
+                .await
+                .map_err(|e| format!("ffmpeg failed: {e}"))?;
+
+            let _ = fs::remove_file(&audio_raw);
+            if !ff_out.status.success() {
+                let _ = fs::remove_dir_all(&tmp_dir);
+                return Err("Failed to convert audio to 16kHz WAV chunks".to_string());
+            }
+        } else {
+            let _ = fs::remove_file(&audio_raw);
+            let ytdlp_err = String::from_utf8_lossy(&dl_out.stderr);
+            let ytdlp_detail = ytdlp_err
+                .lines()
+                .rev()
+                .find(|l| l.contains("ERROR:"))
+                .or_else(|| ytdlp_err.lines().rev().find(|l| !l.trim().is_empty()))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| "Failed to download audio for Whisper".to_string());
+
+            // Fallback: if this video is already saved on Google Drive, extract audio from local stream
+            let stream_url = format!("http://127.0.0.1:{}/stream/{}", config.port, video_id);
+            on_progress(15, "YouTube audio blocked, trying Google Drive stream...".to_string());
+            if let Ok(ff_out) = Command::new(&ffmpeg)
+                .args([
+                    "-y",
+                    "-i",
+                    &stream_url,
+                    "-vn",
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    "-f",
+                    "segment",
+                    "-segment_time",
+                    "1800",
+                    &seg_pattern.to_string_lossy(),
+                ])
+                .output()
+                .await
+            {
+                if ff_out.status.success() && !list_chunk_wavs(&tmp_dir).is_empty() {
+                    drive_fallback_ok = true;
+                }
+            }
+
+            if !drive_fallback_ok {
+                let _ = fs::remove_dir_all(&tmp_dir);
+                return Err(ytdlp_detail);
+            }
         }
-        let _ = fs::remove_file(&audio_raw);
 
         chunk_files = list_chunk_wavs(&tmp_dir);
         if let Some(ref raw) = existing_raw {
@@ -970,6 +1010,11 @@ where
         }
     }
 
+    let target_cache = cache_path(data_dir, video_id, &config.target_lang);
+    let mut bak_os = target_cache.as_os_str().to_os_string();
+    bak_os.push(".bak");
+    let bak_path = PathBuf::from(bak_os);
+
     let (source, mut cues) = match load_raw_cache(data_dir, video_id) {
         Some(raw) if !raw.partial => {
             on_progress(50, "Loaded cached transcription, resuming translation...".to_string());
@@ -977,12 +1022,22 @@ where
         }
         _ => {
             on_progress(5, "Checking YouTube captions...".to_string());
-            let (src, extracted) =
-                extract_raw_cues(data_dir, bin_dir, config, url, video_id, &on_progress).await?;
-            save_raw_cache(data_dir, video_id, &src, &extracted, false, 0, 0);
-            (src, extracted)
+            match extract_raw_cues(data_dir, bin_dir, config, url, video_id, &on_progress).await {
+                Ok((src, extracted)) => {
+                    let _ = fs::remove_file(&bak_path);
+                    save_raw_cache(data_dir, video_id, &src, &extracted, false, 0, 0);
+                    (src, extracted)
+                }
+                Err(err) => {
+                    if !target_cache.is_file() && bak_path.is_file() {
+                        let _ = fs::rename(&bak_path, &target_cache);
+                    }
+                    return Err(err);
+                }
+            }
         }
     };
+    let _ = fs::remove_file(&bak_path);
 
     // If extract_raw_cues already translated each chunk progressively, skip re-translating already translated cues
     let latest_cfg = load_config(data_dir);
@@ -1170,7 +1225,11 @@ pub fn prepare_rewhisper_from_cache(
     let path = data_dir.join("subtitles").join(file_name);
     let raw = fs::read_to_string(&path).map_err(|e| format!("Subtitle cache not found: {e}"))?;
     let bundle: SubtitleBundle = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let _ = fs::remove_file(&path);
+    let mut bak_os = path.as_os_str().to_os_string();
+    bak_os.push(".bak");
+    let bak_path = PathBuf::from(bak_os);
+    let _ = fs::remove_file(&bak_path);
+    fs::rename(&path, &bak_path).map_err(|e| e.to_string())?;
     let _ = fs::remove_file(raw_cache_path(data_dir, &bundle.video_id));
     Ok((bundle.video_id, bundle.title))
 }
