@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.30] - 2026-11-26
+
+### Added & Fixed
+- **Dub Voice Boost (Up to 200%):** Added a dedicated Web Audio `GainNode` + `DynamicsCompressorNode` boost slider (`50%–200%`, default `130%`) in the Extension popup so dubbed speech stays loud and clear over video audio, plus vertical centering for the `Original Vol` slider.
+- **Whisper Glitch Deduplication & Overlap Cleanup:** Added `cleanup_whisper_cues` to merge Whisper repetition loops (overlapping or `<250ms` apart) and eliminate subtitle timestamp overlaps without touching genuine repeated speech.
+
 ## [1.2.29] - 2026-11-26
 
 ### Improved

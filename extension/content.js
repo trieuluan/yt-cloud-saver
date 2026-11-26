@@ -28,6 +28,7 @@
     dubVoice: 'vi-VN-HoaiMyNeural',
     dubSpeed: 1.0,
     dubVolume: 0.15,
+    dubVoiceGain: 1.3,
   };
 
   chrome.storage.local.get({ subStyle }, (res) => {
@@ -932,6 +933,32 @@
 
       if (!dubAudioEl) {
         dubAudioEl = new Audio();
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) {
+            const actx = new AudioCtx();
+            const src = actx.createMediaElementSource(dubAudioEl);
+            const gainNode = actx.createGain();
+            const comp = actx.createDynamicsCompressor();
+            comp.threshold.value = -3;
+            comp.ratio.value = 8;
+            src.connect(gainNode);
+            gainNode.connect(comp);
+            comp.connect(actx.destination);
+            dubAudioEl._ytcsCtx = actx;
+            dubAudioEl._ytcsGain = gainNode;
+          }
+        } catch {}
+      }
+      const voiceGain = Math.max(0.5, Math.min(2.0, Number(subStyle.dubVoiceGain ?? 1.3)));
+      if (dubAudioEl._ytcsGain && dubAudioEl._ytcsCtx) {
+        if (dubAudioEl._ytcsCtx.state === 'suspended') {
+          dubAudioEl._ytcsCtx.resume().catch(() => {});
+        }
+        dubAudioEl._ytcsGain.gain.value = voiceGain;
+        dubAudioEl.volume = 1.0;
+      } else {
+        dubAudioEl.volume = Math.min(1.0, voiceGain);
       }
       dubAudioEl.onended = () => {
         if (mySeq === speakSeq) restoreVideoVolume(video);

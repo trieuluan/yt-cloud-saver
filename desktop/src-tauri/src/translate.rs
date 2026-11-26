@@ -382,6 +382,43 @@ fn build_prev_context(translated_all: &[SubtitleCue], memory: &TranslationMemory
     }
 }
 
+fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
+    if cues.is_empty() {
+        return;
+    }
+    cues.sort_by_key(|c| c.start_ms);
+    let mut cleaned: Vec<SubtitleCue> = Vec::with_capacity(cues.len());
+    for mut cur in cues.drain(..) {
+        let cur_text = cur.original.trim();
+        if cur_text.is_empty() {
+            continue;
+        }
+        cur.original = cur_text.to_string();
+        if let Some(prev) = cleaned.last_mut() {
+            // Merge only true Whisper repetition glitches (overlapping timestamps or <250ms apart),
+            // preserving genuine repeated dialogue like "không chịu đâu, không chịu đâu".
+            if prev.original == cur.original
+                && (cur.start_ms < prev.end_ms || cur.start_ms.saturating_sub(prev.start_ms) < 250)
+            {
+                prev.end_ms = prev.end_ms.max(cur.end_ms);
+                continue;
+            }
+            if cur.start_ms < prev.end_ms {
+                if cur.start_ms > prev.start_ms.saturating_add(120) {
+                    prev.end_ms = cur.start_ms;
+                } else {
+                    cur.start_ms = prev.end_ms;
+                }
+            }
+        }
+        if cur.end_ms < cur.start_ms.saturating_add(150) {
+            cur.end_ms = cur.start_ms.saturating_add(150);
+        }
+        cleaned.push(cur);
+    }
+    *cues = cleaned;
+}
+
 fn contains_cjk_or_kana(s: &str) -> bool {
     s.chars().any(|c| {
         matches!(
@@ -1228,6 +1265,7 @@ where
             )
             .await
         };
+        cleanup_whisper_cues(&mut chunk_cues);
         raw_all.extend(chunk_cues.clone());
         let completed_chunks = chunk_idx + 1;
         save_raw_cache(

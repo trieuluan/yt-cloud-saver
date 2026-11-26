@@ -21,6 +21,8 @@ const prevOrig = document.getElementById('prevOrig');
 const prevTr = document.getElementById('prevTr');
 const dubVolSlider = document.getElementById('dubVolSlider');
 const dubVolLabel = document.getElementById('dubVolLabel');
+const dubGainSlider = document.getElementById('dubGainSlider');
+const dubGainLabel = document.getElementById('dubGainLabel');
 
 const remoteInput = document.getElementById('remoteInput');
 const dubVoiceSelect = document.getElementById('dubVoiceSelect');
@@ -66,6 +68,7 @@ const DEFAULT_SUB_STYLE = {
   dubVoice: 'vi-VN-HoaiMyNeural',
   dubSpeed: 1.0,
   dubVolume: 0.15,
+  dubVoiceGain: 1.3,
 };
 
 let subStyle = { ...DEFAULT_SUB_STYLE };
@@ -123,6 +126,9 @@ function renderSubStyle() {
   const volPct = Math.round(Number(subStyle.dubVolume ?? 0.15) * 100);
   dubVolSlider.value = String(volPct);
   dubVolLabel.textContent = `${volPct}%`;
+  const gainPct = Math.round(Number(subStyle.dubVoiceGain ?? 1.3) * 100);
+  if (dubGainSlider) dubGainSlider.value = String(gainPct);
+  if (dubGainLabel) dubGainLabel.textContent = `${gainPct}%`;
 
   const a = subStyle.bgOpacity / 100;
   prevTr.style.fontSize = `${Math.min(20, Math.round(subStyle.fontSize * 0.68))}px`;
@@ -523,6 +529,10 @@ dubSpeedSelect.addEventListener('change', () => {
 });
 dubVolSlider.addEventListener('input', () => {
   subStyle.dubVolume = Number(dubVolSlider.value) / 100;
+  saveSubStyle();
+});
+dubGainSlider?.addEventListener('input', () => {
+  subStyle.dubVoiceGain = Number(dubGainSlider.value) / 100;
   saveSubStyle();
 });
 

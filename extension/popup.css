@@ -363,6 +363,10 @@ input[type="range"].clean-range::-webkit-slider-thumb {
   flex-direction: column;
   gap: 6px;
 }
+
+.mini-box input[type="range"].clean-range {
+  margin: auto 0;
+}
   text-align: center;
   display: flex;
   flex-direction: column;
