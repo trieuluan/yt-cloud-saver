@@ -315,6 +315,7 @@ async fn repair_whisper_chunk_cues(
     whisper: &Path,
     ffmpeg: &Path,
     model_path: &Path,
+    whisper_lang: &str,
     bin_dir: &Path,
 ) -> Vec<SubtitleCue> {
     let bad_ranges = find_hallucination_ranges(&cues);
@@ -366,6 +367,8 @@ async fn repair_whisper_chunk_cues(
                     .args([
                         "-m",
                         &model_path.to_string_lossy(),
+                        "-l",
+                        whisper_lang,
                         "-mc",
                         "0",
                         "-bs",
@@ -646,6 +649,12 @@ where
         .await?;
     }
 
+    let whisper_lang = if config.whisper_language.trim().is_empty() {
+        "auto"
+    } else {
+        config.whisper_language.trim()
+    };
+
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
         let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
         let base_pct = 20 + (((chunk_idx * 75) / total_chunks.max(1)) as u8);
@@ -658,6 +667,8 @@ where
             .args([
                 "-m",
                 &model_path.to_string_lossy(),
+                "-l",
+                whisper_lang,
                 "-mc",
                 "0",
                 "-et",
@@ -702,6 +713,7 @@ where
             &whisper,
             &ffmpeg,
             &model_path,
+            whisper_lang,
             bin_dir,
         )
         .await;

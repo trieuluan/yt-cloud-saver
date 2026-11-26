@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.11] - 2026-11-26
+
+### Added & Fixed
+- **Whisper Spoken Language Selector (`-l auto` default):** Added a Spoken Language setting (`Auto-detect` by default, or manual `zh`, `en`, `ja`, `ko`, `vi`, `es`, `fr`) in **AI & Translate**, passing `-l <lang>` to `whisper-cli` so non-English videos no longer fall back to `whisper-cli`'s default `-l en` on noisy intros/outros.
+
 ## [1.2.10] - 2026-11-26
 
 ### Fixed

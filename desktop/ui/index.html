@@ -242,6 +242,23 @@
               </div>
             </div>
           </div>
+
+          <div class="sub-box-col">
+            <div class="quality-row">
+              <span class="sub-title">Spoken Language</span>
+              <select id="whisperLangSelect">
+                <option value="auto">Auto-detect (Recommended)</option>
+                <option value="zh">Chinese (中文 · zh)</option>
+                <option value="en">English (en)</option>
+                <option value="ja">Japanese (日本語 · ja)</option>
+                <option value="ko">Korean (한국어 · ko)</option>
+                <option value="vi">Vietnamese (Tiếng Việt · vi)</option>
+                <option value="es">Spanish (Español · es)</option>
+                <option value="fr">French (Français · fr)</option>
+              </select>
+            </div>
+            <div class="muted" style="font-size:11px">Auto-detect works for most videos; pick a language if noisy intros confuse detection.</div>
+          </div>
           <p id="whisperMsg" class="error-text hidden"></p>
         </div>
 

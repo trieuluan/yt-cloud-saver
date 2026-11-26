@@ -62,6 +62,7 @@ const whisperCliStatus = document.getElementById('whisperCliStatus');
 const whisperCliInstallBtn = document.getElementById('whisperCliInstallBtn');
 const whisperCliRemoveBtn = document.getElementById('whisperCliRemoveBtn');
 const whisperModelSelect = document.getElementById('whisperModelSelect');
+const whisperLangSelect = document.getElementById('whisperLangSelect');
 const whisperModelStatus = document.getElementById('whisperModelStatus');
 const whisperModelDlBtn = document.getElementById('whisperModelDlBtn');
 const whisperModelRmBtn = document.getElementById('whisperModelRmBtn');
@@ -364,6 +365,7 @@ async function persistSettings() {
         targetLang: targetLangSelect.value,
         useWhisperFallback: whisperFallbackInput.checked,
         whisperModel: whisperModelSelect.value,
+        whisperLanguage: whisperLangSelect.value,
         preferWhisperOverAutoCc: preferWhisperInput.checked,
         embedSubtitles: embedSubtitlesInput.checked,
       },
@@ -428,6 +430,7 @@ async function loadState() {
       targetLangSelect.value = data.config.targetLang || 'Vietnamese';
       whisperFallbackInput.checked = Boolean(data.config.useWhisperFallback);
       whisperModelSelect.value = data.config.whisperModel || 'small';
+      whisperLangSelect.value = data.config.whisperLanguage || 'auto';
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
       embedSubtitlesInput.checked = Boolean(data.config.embedSubtitles);
       updatePathPreview();
@@ -461,7 +464,7 @@ provBtns.forEach((btn) => {
 });
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
-[targetLangSelect, whisperFallbackInput, preferWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', persistSettings));
+[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', persistSettings));
 
 whisperModelSelect.addEventListener('change', () => {
   renderWhisperUI();

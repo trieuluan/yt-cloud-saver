@@ -69,6 +69,8 @@ pub struct AppConfig {
     pub use_whisper_fallback: bool,
     #[serde(default = "default_whisper_model")]
     pub whisper_model: String,
+    #[serde(default = "default_whisper_language")]
+    pub whisper_language: String,
     #[serde(default)]
     pub prefer_whisper_over_auto_cc: bool,
     #[serde(default)]
@@ -93,6 +95,9 @@ fn default_true() -> bool {
 fn default_whisper_model() -> String {
     "small".to_string()
 }
+fn default_whisper_language() -> String {
+    "auto".to_string()
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -115,6 +120,7 @@ impl Default for AppConfig {
             target_lang: default_target_lang(),
             use_whisper_fallback: true,
             whisper_model: default_whisper_model(),
+            whisper_language: default_whisper_language(),
             prefer_whisper_over_auto_cc: false,
             embed_subtitles: false,
             max_concurrent: 2,
@@ -139,6 +145,7 @@ pub struct ConfigPatch {
     pub target_lang: Option<String>,
     pub use_whisper_fallback: Option<bool>,
     pub whisper_model: Option<String>,
+    pub whisper_language: Option<String>,
     pub prefer_whisper_over_auto_cc: Option<bool>,
     pub embed_subtitles: Option<bool>,
     pub max_concurrent: Option<usize>,
@@ -212,6 +219,14 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(wm) = patch.whisper_model {
         cfg.whisper_model = wm.trim().to_string();
+    }
+    if let Some(wl) = patch.whisper_language {
+        let clean = wl.trim().to_string();
+        cfg.whisper_language = if clean.is_empty() {
+            default_whisper_language()
+        } else {
+            clean
+        };
     }
     if let Some(pw) = patch.prefer_whisper_over_auto_cc {
         cfg.prefer_whisper_over_auto_cc = pw;
