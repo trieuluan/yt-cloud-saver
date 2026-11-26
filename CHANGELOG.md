@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.23] - 2026-11-26
+
+### Improved
+- **Persistent Edge TTS WebSocket Pool:** Reuses up to 2 live Edge TTS WebSocket connections (240s TTL, 6s timeout, auto-retry) instead of opening a new TLS/WS handshake per line, dramatically speeding up AI Dubbing and eliminating 502 stalls.
+- **Cue Duration & Word-Cluster Tightening:** Splits Whisper Cloud word lists on >1.5s internal silent gaps to snap to the actual spoken phrase and caps abnormally stretched short cues (e.g. 3-character lines spanning 15s) so subtitles and Dub never trigger early across silent pauses.
+
 ## [1.2.22] - 2026-11-26
 
 ### Fixed

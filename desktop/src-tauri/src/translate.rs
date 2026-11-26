@@ -234,21 +234,32 @@ async fn transcribe_chunk_cloud(
                 let mut seg_start = seg.start.max(0.0);
                 let mut seg_end = seg.end.max(seg_start + 0.2);
                 if !parsed.words.is_empty() {
-                    let mut first_w: Option<f64> = None;
-                    let mut last_w: Option<f64> = None;
-                    for w in &parsed.words {
-                        let mid = (w.start + w.end) * 0.5;
-                        if mid >= seg.start - 0.05 && mid <= seg.end + 0.05 {
-                            if first_w.is_none() {
-                                first_w = Some(w.start);
+                    let seg_words: Vec<(f64, f64)> = parsed
+                        .words
+                        .iter()
+                        .filter(|w| {
+                            let mid = (w.start + w.end) * 0.5;
+                            mid >= seg.start - 0.05 && mid <= seg.end + 0.05
+                        })
+                        .map(|w| (w.start.max(0.0), w.end.max(w.start)))
+                        .collect();
+                    if !seg_words.is_empty() {
+                        // Split on internal gaps > 1.5s and keep the last dense spoken cluster
+                        let mut cluster_start = seg_words[0].0;
+                        let mut cluster_end = seg_words[0].1;
+                        for win in seg_words.windows(2) {
+                            if win[1].0 - win[0].1 > 1.5 {
+                                cluster_start = win[1].0;
                             }
-                            last_w = Some(w.end);
+                            cluster_end = win[1].1;
                         }
+                        seg_start = cluster_start.max(seg.start).max(0.0);
+                        seg_end = cluster_end.min(seg.end).max(seg_start + 0.25);
                     }
-                    if let (Some(fs), Some(le)) = (first_w, last_w) {
-                        seg_start = fs.max(seg.start).max(0.0);
-                        seg_end = le.min(seg.end).max(seg_start + 0.25);
-                    }
+                }
+                let max_sec = estimate_max_cue_sec(&text);
+                if seg_end - seg_start > max_sec + 1.0 {
+                    seg_start = (seg_end - max_sec).max(seg_start);
                 }
                 let start_ms = offset_ms + (seg_start * 1000.0) as u64;
                 let end_ms = offset_ms + (seg_end * 1000.0) as u64;
@@ -318,6 +329,15 @@ fn contains_cjk_or_kana(s: &str) -> bool {
             0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
         )
     })
+}
+
+fn estimate_max_cue_sec(text: &str) -> f64 {
+    let char_count = text.chars().filter(|c| !c.is_whitespace()).count();
+    if contains_cjk_or_kana(text) {
+        (char_count as f64 * 0.35 + 1.5).clamp(2.5, 9.0)
+    } else {
+        (char_count as f64 * 0.14 + 1.8).clamp(2.8, 9.0)
+    }
 }
 
 fn target_allows_cjk(target_lang: &str) -> bool {
@@ -1097,6 +1117,10 @@ where
             for mut cue in parse_vtt_or_srt(&srt_raw) {
                 cue.start_ms += offset_ms;
                 cue.end_ms += offset_ms;
+                let max_ms = (estimate_max_cue_sec(&cue.original) * 1000.0) as u64;
+                if cue.end_ms.saturating_sub(cue.start_ms) > max_ms + 1000 {
+                    cue.start_ms = cue.end_ms.saturating_sub(max_ms).max(cue.start_ms);
+                }
                 raw_chunk_cues.push(cue);
             }
             repair_whisper_chunk_cues(
