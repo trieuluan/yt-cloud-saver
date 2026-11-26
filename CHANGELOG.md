@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.31] - 2026-11-26
+
+### Improved
+- **Sticky Desktop Header & Footer:** Pinned the header, tab bar, and bottom footer (`Close window to keep running in Menu Bar` + `↻ Updates` / `Guide` / `Support`) so update controls stay always visible without scrolling.
+
 ## [1.2.30] - 2026-11-26
 
 ### Added & Fixed
