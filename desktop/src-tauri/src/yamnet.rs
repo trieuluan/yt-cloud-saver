@@ -1,7 +1,22 @@
+use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::Tensor;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+pub fn shared_ort_env() -> Result<&'static Environment, String> {
+    static ORT_ENV: OnceLock<Result<Environment, String>> = OnceLock::new();
+    ORT_ENV
+        .get_or_init(|| {
+            ort::init()
+                .with_name("ytcs_ort")
+                .build()
+                .map_err(|e| format!("ORT env error: {e}"))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
+}
 
 pub const YAMNET_MODEL_URL: &str =
     "https://huggingface.co/andrelgomes/yamnet-onnx/resolve/main/yamnet.onnx";
@@ -60,11 +75,8 @@ pub fn analyze_pcm_gender_frames(
     if !model_path.is_file() || samples_f32.len() < 16_000 {
         return Ok(Vec::new());
     }
-    let env = ort::init()
-        .with_name("ytcs_yamnet")
-        .build()
-        .map_err(|e| format!("ORT env error: {e}"))?;
-    let mut session = Session::builder(&env)
+    let env = shared_ort_env()?;
+    let mut session = Session::builder(env)
         .map_err(|e| format!("ORT session builder error: {e}"))?
         .commit_from_file(&model_path)
         .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))?;
@@ -124,12 +136,9 @@ pub fn filter_music_and_singing_wav(
 
     let samples_f32: Vec<f32> = pcm_i16.iter().map(|&s| s as f32 / 32768.0).collect();
 
-    let env = ort::init()
-        .with_name("ytcs_yamnet")
-        .build()
-        .map_err(|e| format!("ORT env error: {e}"))?;
+    let env = shared_ort_env()?;
 
-    let mut session = Session::builder(&env)
+    let mut session = Session::builder(env)
         .map_err(|e| format!("ORT session builder error: {e}"))?
         .commit_from_file(&model_path)
         .map_err(|e| format!("Failed to load yamnet.onnx: {e}"))?;
@@ -231,11 +240,8 @@ mod tests {
         if !path.is_file() {
             return;
         }
-        let env = ort::init()
-            .with_name("ytcs_yamnet_test")
-            .build()
-            .expect("env");
-        let mut session = Session::builder(&env)
+        let env = shared_ort_env().expect("env");
+        let mut session = Session::builder(env)
             .expect("session builder")
             .commit_from_file(path)
             .expect("load yamnet.onnx");

@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.37] - 2026-11-27
+
+### Fixed
+- **Shared ONNX Runtime Environment (`ort`):** Shared a single `OnceLock<Environment>` (`shared_ort_env`) across YAMNet and WeSpeaker in `yamnet.rs` and `diarize.rs`, fixing the `"only one environment is allowed per process"` error that prevented speaker diarization from running after YAMNet, and logged diarization errors instead of silently ignoring them.
+
 ## [1.2.36] - 2026-11-27
 
 ### Fixed

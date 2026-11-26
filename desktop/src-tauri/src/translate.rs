@@ -1316,17 +1316,21 @@ where
         let speaker_hints = if latest_cfg.use_speaker_diarization
             && crate::diarize::ensure_wespeaker_model(data_dir).await.is_ok()
         {
-            if let Ok(pairs) = speaker_tracker.diarize_chunk(data_dir, chunk_wav, offset_ms, &chunk_cues) {
-                let mut hints = Vec::with_capacity(pairs.len());
-                for (i, (hint, code)) in pairs.into_iter().enumerate() {
-                    if i < chunk_cues.len() {
-                        chunk_cues[i].speaker = code;
+            match speaker_tracker.diarize_chunk(data_dir, chunk_wav, offset_ms, &chunk_cues) {
+                Ok(pairs) => {
+                    let mut hints = Vec::with_capacity(pairs.len());
+                    for (i, (hint, code)) in pairs.into_iter().enumerate() {
+                        if i < chunk_cues.len() {
+                            chunk_cues[i].speaker = code;
+                        }
+                        hints.push(hint);
                     }
-                    hints.push(hint);
+                    Some(hints)
                 }
-                Some(hints)
-            } else {
-                None
+                Err(e) => {
+                    eprintln!("[diarize] speaker_tracker.diarize_chunk failed: {e}");
+                    None
+                }
             }
         } else {
             None

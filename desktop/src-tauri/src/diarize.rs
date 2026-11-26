@@ -314,11 +314,8 @@ impl SpeakerTracker {
         let yamnet_frames = crate::yamnet::analyze_pcm_gender_frames(data_dir, &pcm_f32)
             .unwrap_or_default();
 
-        let env = ort::init()
-            .with_name("ytcs_wespeaker")
-            .build()
-            .map_err(|e| format!("ORT env error: {e}"))?;
-        let mut session = Session::builder(&env)
+        let env = crate::yamnet::shared_ort_env()?;
+        let mut session = Session::builder(env)
             .map_err(|e| format!("ORT session builder error: {e}"))?
             .commit_from_file(&model_path)
             .map_err(|e| format!("Failed to load wespeaker_voxceleb.onnx: {e}"))?;
@@ -471,8 +468,8 @@ mod tests {
                 }
             });
         if let Some(model_path) = candidate_path.filter(|p| p.is_file()) {
-            let env = ort::init().with_name("ytcs_ws_test").build().expect("env");
-            let mut session = Session::builder(&env)
+            let env = crate::yamnet::shared_ort_env().expect("env");
+            let mut session = Session::builder(env)
                 .expect("builder")
                 .commit_from_file(&model_path)
                 .expect("load wespeaker");
