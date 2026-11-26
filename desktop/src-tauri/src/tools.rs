@@ -15,6 +15,7 @@ pub struct ToolsStatus {
 pub struct WhisperStatus {
     pub cli_installed: bool,
     pub downloaded_models: Vec<String>,
+    pub yamnet_installed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,7 +320,7 @@ fn make_executable(path: &Path) {
     }
 }
 
-async fn download_to_file(url: &str, dest: &Path) -> Result<(), String> {
+pub async fn download_to_file(url: &str, dest: &Path) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .user_agent("yt-cloud-saver/1.1")
         .build()
@@ -501,6 +502,7 @@ pub fn check_whisper_status(data_dir: &Path, bin_dir: &Path) -> WhisperStatus {
     WhisperStatus {
         cli_installed,
         downloaded_models,
+        yamnet_installed: crate::yamnet::is_yamnet_installed(data_dir),
     }
 }
 

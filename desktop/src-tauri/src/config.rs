@@ -91,6 +91,10 @@ pub struct AppConfig {
     pub whisper_cloud_model: String,
     #[serde(default)]
     pub prefer_whisper_over_auto_cc: bool,
+    #[serde(default = "default_true")]
+    pub skip_music_whisper: bool,
+    #[serde(default = "default_yamnet_sensitivity")]
+    pub yamnet_sensitivity: String,
     #[serde(default)]
     pub embed_subtitles: bool,
     #[serde(default = "default_tts_mode")]
@@ -141,6 +145,9 @@ fn default_whisper_cloud_model() -> String {
 fn default_tts_mode() -> String {
     "edge".to_string()
 }
+fn default_yamnet_sensitivity() -> String {
+    "med".to_string()
+}
 fn default_vieneu_model() -> String {
     "v3turbo".to_string()
 }
@@ -176,6 +183,8 @@ impl Default for AppConfig {
             whisper_cloud_api_key: String::new(),
             whisper_cloud_model: default_whisper_cloud_model(),
             prefer_whisper_over_auto_cc: false,
+            skip_music_whisper: true,
+            yamnet_sensitivity: default_yamnet_sensitivity(),
             embed_subtitles: false,
             tts_mode: default_tts_mode(),
             vieneu_model: default_vieneu_model(),
@@ -211,6 +220,8 @@ pub struct ConfigPatch {
     pub whisper_cloud_api_key: Option<String>,
     pub whisper_cloud_model: Option<String>,
     pub prefer_whisper_over_auto_cc: Option<bool>,
+    pub skip_music_whisper: Option<bool>,
+    pub yamnet_sensitivity: Option<String>,
     pub embed_subtitles: Option<bool>,
     pub tts_mode: Option<String>,
     pub vieneu_model: Option<String>,
@@ -315,6 +326,16 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(pw) = patch.prefer_whisper_over_auto_cc {
         cfg.prefer_whisper_over_auto_cc = pw;
+    }
+    if let Some(sm) = patch.skip_music_whisper {
+        cfg.skip_music_whisper = sm;
+    }
+    if let Some(ys) = patch.yamnet_sensitivity {
+        let clean = ys.trim().to_string();
+        cfg.yamnet_sensitivity = match clean.as_str() {
+            "low" | "high" => clean,
+            _ => "med".to_string(),
+        };
     }
     if let Some(tm) = patch.tts_mode {
         let clean = tm.trim().to_string();

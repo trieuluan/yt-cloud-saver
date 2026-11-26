@@ -76,6 +76,14 @@ const whisperCloudTestMsg = document.getElementById('whisperCloudTestMsg');
 const whisperModelStatus = document.getElementById('whisperModelStatus');
 const whisperModelDlBtn = document.getElementById('whisperModelDlBtn');
 const whisperModelRmBtn = document.getElementById('whisperModelRmBtn');
+const skipMusicWhisperInput = document.getElementById('skipMusicWhisperInput');
+const yamnetFilterOpts = document.getElementById('yamnetFilterOpts');
+const yamnetSensLowBtn = document.getElementById('yamnetSensLowBtn');
+const yamnetSensMedBtn = document.getElementById('yamnetSensMedBtn');
+const yamnetSensHighBtn = document.getElementById('yamnetSensHighBtn');
+const yamnetModelStatus = document.getElementById('yamnetModelStatus');
+const yamnetDlBtn = document.getElementById('yamnetDlBtn');
+const yamnetRmBtn = document.getElementById('yamnetRmBtn');
 const whisperMsg = document.getElementById('whisperMsg');
 const vieneuSidecarBadge = document.getElementById('vieneuSidecarBadge');
 const ttsModeEdgeBtn = document.getElementById('ttsModeEdgeBtn');
@@ -245,6 +253,17 @@ function renderVieneuUI(vieneu) {
 }
 
 let currentWhisperMode = 'local';
+let currentYamnetSens = 'med';
+
+function renderYamnetSens(sens) {
+  currentYamnetSens = sens === 'low' || sens === 'high' ? sens : 'med';
+  yamnetSensLowBtn?.classList.toggle('active', currentYamnetSens === 'low');
+  yamnetSensMedBtn?.classList.toggle('active', currentYamnetSens === 'med');
+  yamnetSensHighBtn?.classList.toggle('active', currentYamnetSens === 'high');
+  if (yamnetFilterOpts) {
+    yamnetFilterOpts.style.opacity = skipMusicWhisperInput?.checked ? '1' : '0.45';
+  }
+}
 
 function renderWhisperMode(mode) {
   currentWhisperMode = mode === 'cloud' ? 'cloud' : 'local';
@@ -263,6 +282,15 @@ function renderWhisperUI(whisper) {
     whisperCliStatus.className = cliOk ? 'tool-ok' : 'muted';
     whisperCliInstallBtn.classList.toggle('hidden', cliOk);
     whisperCliRemoveBtn.classList.toggle('hidden', !cliOk);
+    const yamnetOk = Boolean(whisper.yamnetInstalled);
+    if (yamnetModelStatus) {
+      yamnetModelStatus.textContent = yamnetOk
+        ? '✓ yamnet.onnx (15.4 MB · Ready)'
+        : 'yamnet.onnx · Auto-download (15.4 MB)';
+      yamnetModelStatus.className = yamnetOk ? 'tool-ok' : 'muted';
+    }
+    yamnetDlBtn?.classList.toggle('hidden', yamnetOk);
+    yamnetRmBtn?.classList.toggle('hidden', !yamnetOk);
   }
   const m = whisperModelSelect.value || 'small';
   const modelOk = downloadedWhisperModels.includes(m);
@@ -547,6 +575,8 @@ async function persistSettings() {
         whisperCloudApiKey: whisperCloudKeyInput.value.trim(),
         whisperCloudModel: whisperCloudModelInput.value.trim(),
         preferWhisperOverAutoCc: preferWhisperInput.checked,
+        skipMusicWhisper: skipMusicWhisperInput.checked,
+        yamnetSensitivity: currentYamnetSens,
         embedSubtitles: embedSubtitlesInput.checked,
         ttsMode: currentTtsMode,
         vieneuModel: activeVieneuModel,
@@ -625,6 +655,8 @@ async function loadState() {
       whisperCloudKeyInput.value = data.config.whisperCloudApiKey || '';
       whisperCloudModelInput.value = data.config.whisperCloudModel || 'whisper-large-v3-turbo';
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
+      skipMusicWhisperInput.checked = data.config.skipMusicWhisper !== false;
+      renderYamnetSens(data.config.yamnetSensitivity || 'med');
       embedSubtitlesInput.checked = Boolean(data.config.embedSubtitles);
       renderTtsMode(data.config.ttsMode || 'edge');
       activeVieneuModel = data.config.vieneuModel || 'v3turbo';
@@ -669,7 +701,44 @@ provBtns.forEach((btn) => {
 });
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
-[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', persistSettings));
+[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', () => {
+  renderYamnetSens(currentYamnetSens);
+  persistSettings();
+}));
+
+yamnetSensLowBtn?.addEventListener('click', () => { renderYamnetSens('low'); persistSettings(); });
+yamnetSensMedBtn?.addEventListener('click', () => { renderYamnetSens('med'); persistSettings(); });
+yamnetSensHighBtn?.addEventListener('click', () => { renderYamnetSens('high'); persistSettings(); });
+
+yamnetDlBtn?.addEventListener('click', async () => {
+  whisperMsg.classList.add('hidden');
+  yamnetDlBtn.disabled = true;
+  yamnetDlBtn.textContent = 'Downloading...';
+  try {
+    const status = await invoke('download_yamnet_model_cmd');
+    renderWhisperUI(status);
+  } catch (err) {
+    whisperMsg.textContent = String(err);
+    whisperMsg.classList.remove('hidden');
+  } finally {
+    yamnetDlBtn.disabled = false;
+    yamnetDlBtn.textContent = 'Download';
+  }
+});
+
+yamnetRmBtn?.addEventListener('click', async () => {
+  whisperMsg.classList.add('hidden');
+  yamnetRmBtn.disabled = true;
+  try {
+    const status = await invoke('remove_yamnet_model_cmd');
+    renderWhisperUI(status);
+  } catch (err) {
+    whisperMsg.textContent = String(err);
+    whisperMsg.classList.remove('hidden');
+  } finally {
+    yamnetRmBtn.disabled = false;
+  }
+});
 [whisperCloudKeyInput, whisperCloudModelInput, whisperCloudBaseUrlInput].forEach((el) => el.addEventListener('change', persistSettings));
 
 whisperModeLocalBtn.addEventListener('click', () => {

@@ -283,6 +283,30 @@
           </div>
 
           <div class="sub-box-col">
+            <label class="toggle-row" style="margin:0;">
+              <div>
+                <div class="sub-title">Skip Music &amp; Singing (YAMNet)</div>
+                <div class="muted" style="font-size:11px;">Bỏ qua nhạc nền &amp; lời bài hát trước khi Whisper chép chữ</div>
+              </div>
+              <input id="skipMusicWhisperInput" type="checkbox" checked />
+            </label>
+            <div id="yamnetFilterOpts" style="display:flex;flex-direction:column;gap:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+              <div class="seg-tabs" style="margin:0;grid-template-columns:repeat(3,1fr);">
+                <button id="yamnetSensLowBtn" class="seg-btn" type="button">Nhẹ (An toàn)</button>
+                <button id="yamnetSensMedBtn" class="seg-btn active" type="button">Cân bằng</button>
+                <button id="yamnetSensHighBtn" class="seg-btn" type="button">Mạnh (Lọc kỹ)</button>
+              </div>
+              <div class="sub-box-foot">
+                <span id="yamnetModelStatus" class="muted">Checking...</span>
+                <div class="btn-group">
+                  <button id="yamnetDlBtn" class="btn-primary btn-xs" type="button">Download</button>
+                  <button id="yamnetRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-box-col">
             <div class="quality-row">
               <span class="sub-title">Spoken Language</span>
               <select id="whisperLangSelect">

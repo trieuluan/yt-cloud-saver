@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.32] - 2026-11-27
+
+### Added & Improved
+- **YAMNet ONNX Music & Singing Pre-Filter:** Automatically mutes background music and singing segments before Whisper transcription using `yamnet.onnx` (~15.4 MB via Rust `ort`), with 3 sensitivity presets (`Nhẹ`, `Cân bằng`, `Mạnh`) and toggle in `AI & Translate`.
+- **Natural Subtitle Punctuation for Expressive TTS:** Added prompt rule to restore `?`, `!`, and `,` for questions, exclamations, and pauses (without adding trailing `.` to incomplete subtitle fragments) so both subtitles and TTS intonation sound natural.
+
 ## [1.2.31] - 2026-11-26
 
 ### Improved

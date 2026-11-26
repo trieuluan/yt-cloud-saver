@@ -6,6 +6,7 @@ mod tools;
 mod translate;
 mod tts;
 mod vieneu;
+mod yamnet;
 
 use config::{load_config, save_config, AppConfig, ConfigPatch};
 use jobs::{EnqueueRequest, Job, JobManager, SavedIdsCache};
@@ -133,6 +134,18 @@ async fn remove_whisper_model_cmd(
     model_name: String,
 ) -> Result<WhisperStatus, String> {
     remove_whisper_model(&state.data_dir, &model_name)?;
+    Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
+}
+
+#[tauri::command]
+async fn download_yamnet_model_cmd(state: State<'_, AppState>) -> Result<WhisperStatus, String> {
+    yamnet::ensure_yamnet_model(&state.data_dir).await?;
+    Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
+}
+
+#[tauri::command]
+async fn remove_yamnet_model_cmd(state: State<'_, AppState>) -> Result<WhisperStatus, String> {
+    yamnet::remove_yamnet_model(&state.data_dir)?;
     Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
 }
 
@@ -511,6 +524,8 @@ pub fn run() {
             remove_whisper_cli_cmd,
             download_whisper_model_cmd,
             remove_whisper_model_cmd,
+            download_yamnet_model_cmd,
+            remove_yamnet_model_cmd,
             install_vieneu_runtime_cmd,
             remove_vieneu_runtime_cmd,
             download_vieneu_model_cmd,

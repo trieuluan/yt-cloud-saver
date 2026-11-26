@@ -488,7 +488,7 @@ async fn translate_indexed_subset(
         "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
     };
     let prompt = format!(
-        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation).\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
+        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation). Add natural punctuation ('?' for questions, '!' for exclamations/commands/calls, ',' for pauses) so TTS intonation sounds expressive, but do NOT force a trailing '.' on short incomplete fragments.\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
@@ -1193,6 +1193,18 @@ where
             format!("{mode_label} chunk {}/{total_chunks} ({base_pct}%)", chunk_idx + 1),
         );
         let offset_ms = (chunk_idx as u64) * chunk_ms;
+
+        if config.skip_music_whisper {
+            if crate::yamnet::ensure_yamnet_model(data_dir).await.is_ok() {
+                let d_dir = data_dir.to_path_buf();
+                let w_path = chunk_wav.to_path_buf();
+                let sens = config.yamnet_sensitivity.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::yamnet::filter_music_and_singing_wav(&d_dir, &w_path, &sens)
+                })
+                .await;
+            }
+        }
 
         let mut chunk_cues = if is_cloud {
             transcribe_chunk_cloud(config, chunk_wav, whisper_lang, offset_ms).await?
