@@ -736,6 +736,7 @@
     video.addEventListener('seeking', () => {
       preparedFromIdx = -1;
       preparedUpToIdx = -1;
+      lastPrefetchedIdx = -1;
       if (dubEnabled) stopDubbingSpeech(video, true);
     });
     video.addEventListener('ended', () => {
@@ -970,16 +971,21 @@
 
       const ytRate = Math.max(0.5, Number(video.playbackRate) || 1);
       const userSpeed = Math.max(0.7, Math.min(2.0, Number(subStyle.dubSpeed) || 1.0));
-      const baseAudioRate = (userSpeed * ytRate) / 1.15;
+      const sourceRateFactor = voice.startsWith('vieneu:') ? 1.0 : 1.15;
+      const baseAudioRate = (userSpeed * ytRate) / sourceRateFactor;
       let exactAudioRate = baseAudioRate;
       const audioDur = duration > 0 ? duration : (Number.isFinite(dubAudioEl.duration) ? dubAudioEl.duration : 0);
       if (audioDur > 0) {
-        const remCueMs = Math.max(300, (cue.endMs || 0) - video.currentTime * 1000);
+        const nextCue = subBundle?.cues?.[idx + 1];
+        const maxEndMs = nextCue
+          ? Math.min((cue.endMs || 0) + 1200, Math.max(cue.endMs || 0, (nextCue.startMs || 0) - 80))
+          : (cue.endMs || 0) + 1200;
+        const remCueMs = Math.max(300, maxEndMs - video.currentTime * 1000);
         const availSec = remCueMs / 1000 / ytRate;
         const fitAudioRate = audioDur / Math.max(0.25, availSec * 0.96);
         exactAudioRate = Math.max(baseAudioRate, fitAudioRate);
       } else {
-        exactAudioRate = computeDubRate(text, cue, video) / 1.15;
+        exactAudioRate = computeDubRate(text, cue, video) / sourceRateFactor;
       }
       dubAudioEl.playbackRate = Math.min(2.5, Math.max(0.7, exactAudioRate));
       duckVideoVolume(video);

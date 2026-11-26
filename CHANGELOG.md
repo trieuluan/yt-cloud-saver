@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.33] - 2026-11-27
+
+### Improved
+- **Smoother Dubbing Cadence & VieNeu 1.0x Rate:** Allowed dubbing audio to borrow up to `1.2s` of trailing silence before the next cue (80ms guard) so short lines aren't rushed, normalized VieNeu-TTS base playback rate to `1.0x`, and added a soft conciseness preference in translation prompts without sacrificing meaning.
+- **UI Clarity:** Renamed `Offline Speech-to-Text (whisper.cpp)` to `Speech-to-Text (Whisper · Local / Cloud)` in Desktop settings.
+
 ## [1.2.32] - 2026-11-27
 
 ### Added & Improved
