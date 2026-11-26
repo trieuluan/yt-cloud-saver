@@ -1311,17 +1311,6 @@ where
             .await
         };
         cleanup_whisper_cues(&mut chunk_cues);
-        raw_all.extend(chunk_cues.clone());
-        let completed_chunks = chunk_idx + 1;
-        save_raw_cache(
-            data_dir,
-            video_id,
-            "whisper",
-            &raw_all,
-            completed_chunks < total_chunks,
-            completed_chunks,
-            total_chunks,
-        );
 
         let latest_cfg = load_config(data_dir);
         let speaker_hints = if latest_cfg.use_speaker_diarization
@@ -1343,6 +1332,18 @@ where
             None
         };
         let _ = fs::remove_file(chunk_wav);
+
+        raw_all.extend(chunk_cues.clone());
+        let completed_chunks = chunk_idx + 1;
+        save_raw_cache(
+            data_dir,
+            video_id,
+            "whisper",
+            &raw_all,
+            completed_chunks < total_chunks,
+            completed_chunks,
+            total_chunks,
+        );
 
         let tr_pct = 20 + ((((chunk_idx * 75) + 40) / total_chunks.max(1)) as u8).min(78);
         on_progress(

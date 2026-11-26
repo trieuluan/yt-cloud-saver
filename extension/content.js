@@ -784,7 +784,7 @@
         'vieneu:Trúc Ly',
         'vieneu:Ngọc Trân',
       ].filter((v, idx, a) => v && a.indexOf(v) === idx);
-      const count = [...speakerVoiceMap.keys()].filter((k) => k.endsWith(`|F:${k.split('|F:')[1]}`)).length;
+      const count = [...speakerVoiceMap.keys()].filter((k) => k.includes('|F:')).length;
       const chosen = fPool[count % fPool.length];
       speakerVoiceMap.set(cacheKey, chosen);
       return chosen;
@@ -892,7 +892,7 @@
   let lastPrefetchedIdx = -1;
   async function prefetchNextCues(idx) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-    if (voice === 'browser' || subStyle.multiVoice || !subBundle?.cues?.length) return;
+    if (voice === 'browser' || !subBundle?.cues?.length) return;
     if (idx === lastPrefetchedIdx) return;
     lastPrefetchedIdx = idx;
     pruneRamCacheWindow(idx, voice, '+15%');

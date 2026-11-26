@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.36] - 2026-11-27
+
+### Fixed
+- **Speaker Metadata Persistence (`_raw.json`):** Ran `diarize_chunk` before saving `_raw.json` in `transcribe_audio_with_whisper` so speaker tags (`F:A`, `M:B`, ...) are preserved across resumed jobs and re-translations.
+- **Multi-Voice Prefetch & Rotation:** Removed the early return in `prefetchNextCues` when `multiVoice` is enabled, and normalized female speaker pool counting (`k.includes('|F:')`) in `extension/content.js`.
+
 ## [1.2.35] - 2026-11-27
 
 ### Fixed
