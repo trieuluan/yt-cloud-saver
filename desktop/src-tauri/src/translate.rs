@@ -1163,7 +1163,13 @@ async fn call_llm_once(config: &AppConfig, prompt: &str) -> Result<String, Strin
         let resp = client
             .post(&endpoint)
             .json(&json!({
-                "contents": [{ "parts": [{ "text": prompt }] }]
+                "contents": [{ "parts": [{ "text": prompt }] }],
+                "safetySettings": [
+                    { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE" },
+                    { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
+                    { "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE" },
+                    { "category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE" }
+                ]
             }))
             .send()
             .await

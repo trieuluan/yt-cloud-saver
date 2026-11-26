@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.16] - 2026-11-26
+
+### Improved
+- **Gemini `safetySettings: BLOCK_NONE`:** Configured official `safetySettings` (`BLOCK_NONE` for Harassment, Hate Speech, Sexually Explicit, and Dangerous Content) on Gemini translation requests so fictional movie/drama dialogue is not falsely blocked mid-batch.
+
 ## [1.2.15] - 2026-11-26
 
 ### Added & Improved
