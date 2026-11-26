@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.14] - 2026-11-26
+
+### Fixed & Improved
+- **Indexed JSON Translation & Auto-Retry (No Shifted or Dropped Lines):** Switched subtitle translation from plain string arrays (`BATCH_SIZE = 100`) to indexed JSON objects (`[{"i":0,"t":"..."}]`, `BATCH_SIZE = 50`) with strict length checks and automatic split/retry for any missed lines — eliminating shifted subtitles and untranslated batches on lighter models like `gemini-3.5-flash-lite`.
+
 ## [1.2.13] - 2026-11-26
 
 ### Fixed & Improved

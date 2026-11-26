@@ -5442,7 +5442,7 @@ dependencies = [
 
 [[package]]
 name = "yt-cloud-saver-desktop"
-version = "1.2.13"
+version = "1.2.14"
 dependencies = [
  "axum",
  "chrono",

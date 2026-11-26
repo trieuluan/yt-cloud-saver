@@ -117,6 +117,128 @@ fn parse_chunk_index(path: &Path) -> Option<usize> {
         .and_then(|s| s.parse::<usize>().ok())
 }
 
+const TRANSLATE_BATCH_SIZE: usize = 50;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexedSubtitleLine {
+    i: usize,
+    t: String,
+}
+
+fn build_prev_context(translated_all: &[SubtitleCue]) -> String {
+    if translated_all.is_empty() {
+        return String::new();
+    }
+    let tail_start = translated_all.len().saturating_sub(6);
+    let pairs: Vec<String> = translated_all[tail_start..]
+        .iter()
+        .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
+        .collect();
+    format!(
+        "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
+        pairs.join("\n")
+    )
+}
+
+async fn translate_indexed_subset(
+    cfg: &AppConfig,
+    items: &[IndexedSubtitleLine],
+    prev_context: &str,
+    title: Option<&str>,
+) -> Result<Vec<(usize, String)>, String> {
+    let title_ctx = title
+        .filter(|t| !t.is_empty())
+        .map(|t| format!(" for the video titled \"{}\"", t))
+        .unwrap_or_default();
+    let prompt = format!(
+        "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent{}).{}\nEach item has an index \"i\" and text \"t\". Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge or skip lines.\n\n{}",
+        items.len(),
+        cfg.target_lang,
+        title_ctx,
+        prev_context,
+        serde_json::to_string(items).unwrap_or_default()
+    );
+    let reply = call_llm(cfg, &prompt).await?;
+    let trimmed = reply.trim();
+    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
+        let slice = &trimmed[start..=end];
+        if let Ok(parsed) = serde_json::from_str::<Vec<IndexedSubtitleLine>>(slice) {
+            return Ok(parsed
+                .into_iter()
+                .filter_map(|it| {
+                    let t = it.t.trim().to_string();
+                    if t.is_empty() { None } else { Some((it.i, t)) }
+                })
+                .collect());
+        }
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(slice) {
+            if arr.len() == items.len() {
+                return Ok(items
+                    .iter()
+                    .zip(arr.into_iter())
+                    .filter_map(|(it, s)| {
+                        let t = s.trim().to_string();
+                        if t.is_empty() { None } else { Some((it.i, t)) }
+                    })
+                    .collect());
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
+async fn translate_batch_exact(
+    cfg: &AppConfig,
+    batch: &mut [SubtitleCue],
+    prev_context: &str,
+    title: Option<&str>,
+) -> Result<(), String> {
+    let items: Vec<IndexedSubtitleLine> = batch
+        .iter()
+        .enumerate()
+        .map(|(i, c)| IndexedSubtitleLine {
+            i,
+            t: c.original.clone(),
+        })
+        .collect();
+
+    if let Ok(pairs) = translate_indexed_subset(cfg, &items, prev_context, title).await {
+        for (idx, tr) in pairs {
+            if idx < batch.len() {
+                batch[idx].translated = tr;
+            }
+        }
+    } else {
+        // Propagate hard API errors (e.g. 429 / auth)
+        let _ = translate_indexed_subset(cfg, &items, prev_context, title).await?;
+    }
+
+    let missing: Vec<IndexedSubtitleLine> = batch
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.translated.is_empty())
+        .map(|(i, c)| IndexedSubtitleLine {
+            i,
+            t: c.original.clone(),
+        })
+        .collect();
+
+    if !missing.is_empty() {
+        // If too many lines failed/missed in a large batch, split into smaller sub-batches; otherwise retry missing indices
+        let chunk_size = if missing.len() > 12 { 15 } else { missing.len() };
+        for sub in missing.chunks(chunk_size) {
+            if let Ok(pairs) = translate_indexed_subset(cfg, sub, prev_context, title).await {
+                for (idx, tr) in pairs {
+                    if idx < batch.len() {
+                        batch[idx].translated = tr;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn translate_cue_batches(
     cues: &mut [SubtitleCue],
     translated_all: &mut Vec<SubtitleCue>,
@@ -124,36 +246,9 @@ async fn translate_cue_batches(
     video_id: &str,
     latest_cfg: &AppConfig,
 ) -> Result<(), String> {
-    const BATCH_SIZE: usize = 100;
-    for batch in cues.chunks_mut(BATCH_SIZE) {
-        let lines: Vec<&str> = batch.iter().map(|c| c.original.as_str()).collect();
-        let prev_context = if translated_all.is_empty() {
-            String::new()
-        } else {
-            let tail_start = translated_all.len().saturating_sub(6);
-            let pairs: Vec<String> = translated_all[tail_start..]
-                .iter()
-                .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
-                .collect();
-            format!(
-                "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
-                pairs.join("\n")
-            )
-        };
-        let prompt = format!(
-            "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent).{}\nReturn ONLY a JSON array of strings with the exact same length ({}) in the same order.\n\n{}",
-            lines.len(),
-            latest_cfg.target_lang,
-            prev_context,
-            lines.len(),
-            serde_json::to_string(&lines).unwrap_or_default()
-        );
-        let reply = call_llm(latest_cfg, &prompt).await?;
-        if let Some(translated) = parse_json_string_array(&reply) {
-            for (cue, tr) in batch.iter_mut().zip(translated.into_iter()) {
-                cue.translated = tr;
-            }
-        }
+    for batch in cues.chunks_mut(TRANSLATE_BATCH_SIZE) {
+        let prev_context = build_prev_context(translated_all);
+        translate_batch_exact(latest_cfg, batch, &prev_context, None).await?;
         for cue in batch.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
@@ -985,13 +1080,6 @@ pub async fn list_ai_models(config: &AppConfig) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
-fn parse_json_string_array(raw: &str) -> Option<Vec<String>> {
-    let trimmed = raw.trim();
-    let start = trimmed.find('[')?;
-    let end = trimmed.rfind(']')?;
-    serde_json::from_str::<Vec<String>>(&trimmed[start..=end]).ok()
-}
-
 pub async fn translate_video_subtitles<F>(
     data_dir: &Path,
     bin_dir: &Path,
@@ -1063,46 +1151,18 @@ where
 
     let resume_from = translated_all.len();
     let total_cues = cues.len().max(1);
-    const BATCH_SIZE: usize = 100;
     let remaining = &mut cues[resume_from..];
-    let total_batches = remaining.len().div_ceil(BATCH_SIZE).max(1);
+    let total_batches = remaining.len().div_ceil(TRANSLATE_BATCH_SIZE).max(1);
 
-    for (b_idx, chunk) in remaining.chunks_mut(BATCH_SIZE).enumerate() {
-        let done_cues = resume_from + b_idx * BATCH_SIZE;
+    for (b_idx, chunk) in remaining.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
+        let done_cues = resume_from + b_idx * TRANSLATE_BATCH_SIZE;
         let pct = 55 + (((done_cues * 40) / total_cues) as u8);
         on_progress(
             pct,
             format!("Translating batch {}/{total_batches} ({pct}%)", b_idx + 1),
         );
-        let lines: Vec<&str> = chunk.iter().map(|c| c.original.as_str()).collect();
-        let prev_context = if translated_all.is_empty() {
-            String::new()
-        } else {
-            let tail_start = translated_all.len().saturating_sub(6);
-            let pairs: Vec<String> = translated_all[tail_start..]
-                .iter()
-                .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
-                .collect();
-            format!(
-                "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
-                pairs.join("\n")
-            )
-        };
-        let prompt = format!(
-            "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent for the video titled \"{}\").{}\nReturn ONLY a JSON array of strings with the exact same length ({}) in the same order.\n\n{}",
-            lines.len(),
-            latest_cfg.target_lang,
-            title,
-            prev_context,
-            lines.len(),
-            serde_json::to_string(&lines).unwrap_or_default()
-        );
-        let reply = call_llm(&latest_cfg, &prompt).await?;
-        if let Some(translated) = parse_json_string_array(&reply) {
-            for (cue, tr) in chunk.iter_mut().zip(translated.into_iter()) {
-                cue.translated = tr;
-            }
-        }
+        let prev_context = build_prev_context(&translated_all);
+        translate_batch_exact(&latest_cfg, chunk, &prev_context, Some(title)).await?;
         for cue in chunk.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
