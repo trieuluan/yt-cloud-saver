@@ -112,6 +112,15 @@ fn list_chunk_audio(tmp_dir: &Path, is_cloud: bool) -> Vec<PathBuf> {
 }
 
 #[derive(Debug, Deserialize)]
+struct CloudWhisperWord {
+    start: f64,
+    end: f64,
+    #[serde(default)]
+    #[allow(dead_code)]
+    word: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct CloudWhisperSegment {
     start: f64,
     end: f64,
@@ -124,6 +133,8 @@ struct CloudWhisperResponse {
     text: String,
     #[serde(default)]
     segments: Vec<CloudWhisperSegment>,
+    #[serde(default)]
+    words: Vec<CloudWhisperWord>,
 }
 
 pub async fn test_whisper_cloud_connection(config: &AppConfig) -> Result<String, String> {
@@ -195,7 +206,9 @@ async fn transcribe_chunk_cloud(
         let mut form = reqwest::multipart::Form::new()
             .part("file", part)
             .text("model", model.to_string())
-            .text("response_format", "verbose_json");
+            .text("response_format", "verbose_json")
+            .text("timestamp_granularities[]", "segment")
+            .text("timestamp_granularities[]", "word");
         if !whisper_lang.is_empty() && whisper_lang != "auto" {
             form = form.text("language", whisper_lang.to_string());
         }
@@ -218,8 +231,27 @@ async fn transcribe_chunk_cloud(
                 if text.is_empty() {
                     continue;
                 }
-                let start_ms = offset_ms + (seg.start.max(0.0) * 1000.0) as u64;
-                let end_ms = offset_ms + (seg.end.max(seg.start + 0.2) * 1000.0) as u64;
+                let mut seg_start = seg.start.max(0.0);
+                let mut seg_end = seg.end.max(seg_start + 0.2);
+                if !parsed.words.is_empty() {
+                    let mut first_w: Option<f64> = None;
+                    let mut last_w: Option<f64> = None;
+                    for w in &parsed.words {
+                        let mid = (w.start + w.end) * 0.5;
+                        if mid >= seg.start - 0.05 && mid <= seg.end + 0.05 {
+                            if first_w.is_none() {
+                                first_w = Some(w.start);
+                            }
+                            last_w = Some(w.end);
+                        }
+                    }
+                    if let (Some(fs), Some(le)) = (first_w, last_w) {
+                        seg_start = fs.max(seg.start).max(0.0);
+                        seg_end = le.min(seg.end).max(seg_start + 0.25);
+                    }
+                }
+                let start_ms = offset_ms + (seg_start * 1000.0) as u64;
+                let end_ms = offset_ms + (seg_end * 1000.0) as u64;
                 cues.push(SubtitleCue {
                     start_ms,
                     end_ms,

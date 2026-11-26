@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.21] - 2026-11-26
+
+### Improved
+- **Word-Level Timestamp Snapping for Whisper Cloud:** Sends `timestamp_granularities[]=segment` & `word` with `verbose_json` and snaps each subtitle cue's start/end to the actual first/last spoken word timestamps, preventing subtitles from appearing early across silent pauses.
+
 ## [1.2.20] - 2026-11-26
 
 ### Fixed & Improved
