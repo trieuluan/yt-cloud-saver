@@ -288,7 +288,16 @@ function renderJobs(jobs = [], translations = []) {
         kind === 'translate'
           ? '<span class="kind-pill kind-translate">Translate</span>'
           : '<span class="kind-pill kind-cloud">Cloud</span>';
-      const barCls = job.status === 'done' ? 'done' : kind === 'translate' ? 'translate' : '';
+      const barCls = [
+        job.status === 'done' ? 'done' : isRetryable ? 'error' : kind === 'translate' ? 'translate' : '',
+        isActive ? 'active' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const visualPct = isActive ? Math.max(pct, 8) : pct;
+      const pulseDot = isActive
+        ? `<span class="pulse-dot${kind === 'translate' ? ' translate' : ''}"></span>`
+        : '';
 
       return `
         <div class="job-item">
@@ -296,9 +305,9 @@ function renderJobs(jobs = [], translations = []) {
             <div class="job-title">${badge}${escapeHtml(job.title || job.url)}</div>
             ${actionBtn}
           </div>
-          <div class="job-meta">${escapeHtml(job.stageText || job.status)} · ${escapeHtml(job.remote || '')}</div>
+          <div class="job-meta">${pulseDot}${escapeHtml(job.stageText || job.status)} · ${escapeHtml(job.remote || '')}</div>
           ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ''}
-          <div class="bar"><div class="bar-fill ${barCls}" style="width:${pct}%"></div></div>
+          <div class="bar"><div class="bar-fill ${barCls}" style="width:${visualPct}%"></div></div>
           ${
             job.sizeText || job.speedText
               ? `<div class="job-stats"><span class="size-val">${escapeHtml(job.sizeText || '')}</span><span>${escapeHtml(job.speedText || '')}</span></div>`

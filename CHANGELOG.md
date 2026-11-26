@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.19] - 2026-11-26
+
+### Improved
+- **Animated Progress Bars for Cloud & Translate Jobs:** Added smooth width transitions, active shimmer sweep (`barFlow`), pulsing status indicator (`pulse-dot`), and minimum visible bar width (`8%`) while downloading/uploading to Drive or running Whisper/AI translation.
+
 ## [1.2.18] - 2026-11-26
 
 ### Improved
