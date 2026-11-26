@@ -2,6 +2,7 @@ use crate::config::{load_config, AppConfig};
 use crate::tools::{build_env_path, find_binary, whisper_model_path};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -307,19 +308,78 @@ struct IndexedSubtitleLine {
     t: String,
 }
 
-fn build_prev_context(translated_all: &[SubtitleCue]) -> String {
-    if translated_all.is_empty() {
-        return String::new();
+#[derive(Default)]
+struct TranslationMemory {
+    glossary: Vec<(String, String)>,
+    scene_note: String,
+}
+
+impl TranslationMemory {
+    fn merge(&mut self, new_entries: BTreeMap<String, String>, new_scene: Option<String>) {
+        for (k, v) in new_entries {
+            let src = k.trim().to_string();
+            let dst = v.trim().to_string();
+            if src.is_empty() || dst.is_empty() {
+                continue;
+            }
+            if let Some(existing) = self.glossary.iter_mut().find(|(s, _)| s == &src) {
+                existing.1 = dst;
+            } else if self.glossary.len() < 50 {
+                self.glossary.push((src, dst));
+            }
+        }
+        if let Some(sc) = new_scene {
+            let clean = sc.trim().to_string();
+            if !clean.is_empty() {
+                self.scene_note = clean;
+            }
+        }
     }
-    let tail_start = translated_all.len().saturating_sub(12);
-    let pairs: Vec<String> = translated_all[tail_start..]
-        .iter()
-        .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
-        .collect();
-    format!(
-        "\nPrevious context (match character names, pronouns, and tone; DO NOT include in output):\n{}\n",
-        pairs.join("\n")
-    )
+}
+
+#[derive(Deserialize)]
+struct BatchTranslationObj {
+    #[serde(default)]
+    lines: Vec<IndexedSubtitleLine>,
+    #[serde(default)]
+    glossary: BTreeMap<String, String>,
+    #[serde(default)]
+    scene: Option<String>,
+}
+
+fn build_prev_context(translated_all: &[SubtitleCue], memory: &TranslationMemory) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !memory.glossary.is_empty() {
+        let g_lines: Vec<String> = memory
+            .glossary
+            .iter()
+            .map(|(k, v)| format!("- {k} => {v}"))
+            .collect();
+        parts.push(format!(
+            "Global Character & Term Glossary (keep strictly consistent across the whole video):\n{}",
+            g_lines.join("\n")
+        ));
+    }
+    if !memory.scene_note.is_empty() {
+        parts.push(format!("Current Scene & Pronouns: {}", memory.scene_note));
+    }
+    if !translated_all.is_empty() {
+        let tail_start = translated_all.len().saturating_sub(4);
+        let pairs: Vec<String> = translated_all[tail_start..]
+            .iter()
+            .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
+            .collect();
+        parts.push(format!(
+            "Previous {} lines (match immediate dialogue flow; DO NOT include in output):\n{}",
+            pairs.len(),
+            pairs.join("\n")
+        ));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}\n", parts.join("\n\n"))
+    }
 }
 
 fn contains_cjk_or_kana(s: &str) -> bool {
@@ -371,6 +431,7 @@ async fn translate_indexed_subset(
     prev_context: &str,
     title: Option<&str>,
     strict_retry: bool,
+    memory: Option<&mut TranslationMemory>,
 ) -> Result<Vec<(usize, String)>, String> {
     let title_ctx = title
         .filter(|t| !t.is_empty())
@@ -384,18 +445,45 @@ async fn translate_indexed_subset(
     } else {
         String::new()
     };
+    let output_rule = if memory.is_some() {
+        "4. Return ONLY a JSON object: {\"lines\":[{\"i\":0,\"t\":\"...\"},...],\"glossary\":{\"source_term\":\"translated_name\"},\"scene\":\"1-sentence current scene & pronouns\"}. In \"glossary\", ONLY include NEW character names, proper nouns, or ASR homophone aliases discovered in this batch (leave {} if none). Keep \"lines\" with exact same \"i\" indices; do NOT merge, split, or skip lines."
+    } else {
+        "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
+    };
     let prompt = format!(
-        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation).\n2. Keep character names, relationships, and pronouns strictly consistent with the previous context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g., misheard character names or slang like 风唇→丰唇, 不生字→不识字); infer the intended meaning from context and translate naturally.\n4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{{\"i\":0,\"t\":\"...\"}}, ...]. Do NOT merge, split, or skip lines.{}{}\n\n{}",
+        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation).\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu).\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
         cfg.target_lang,
+        output_rule,
         prev_context,
         retry_note,
         serde_json::to_string(items).unwrap_or_default()
     );
     let reply = call_llm(cfg, &prompt).await?;
     let trimmed = reply.trim();
+    if let (Some(obj_start), Some(obj_end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        let arr_start = trimmed.find('[');
+        if arr_start.map(|a| obj_start < a).unwrap_or(true) {
+            let slice = &trimmed[obj_start..=obj_end];
+            if let Ok(parsed) = serde_json::from_str::<BatchTranslationObj>(slice) {
+                if !parsed.lines.is_empty() {
+                    if let Some(mem) = memory {
+                        mem.merge(parsed.glossary, parsed.scene);
+                    }
+                    return Ok(parsed
+                        .lines
+                        .into_iter()
+                        .filter_map(|it| {
+                            let t = it.t.trim().to_string();
+                            if t.is_empty() { None } else { Some((it.i, t)) }
+                        })
+                        .collect());
+                }
+            }
+        }
+    }
     if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
         let slice = &trimmed[start..=end];
         if let Ok(parsed) = serde_json::from_str::<Vec<IndexedSubtitleLine>>(slice) {
@@ -428,6 +516,7 @@ async fn translate_batch_exact(
     batch: &mut [SubtitleCue],
     prev_context: &str,
     title: Option<&str>,
+    memory: &mut TranslationMemory,
 ) -> Result<(), String> {
     let items: Vec<IndexedSubtitleLine> = batch
         .iter()
@@ -438,7 +527,7 @@ async fn translate_batch_exact(
         })
         .collect();
 
-    if let Ok(pairs) = translate_indexed_subset(cfg, &items, prev_context, title, false).await {
+    if let Ok(pairs) = translate_indexed_subset(cfg, &items, prev_context, title, false, Some(memory)).await {
         for (idx, tr) in pairs {
             if idx < batch.len() {
                 batch[idx].translated = tr;
@@ -446,7 +535,7 @@ async fn translate_batch_exact(
         }
     } else {
         // Propagate hard API errors (e.g. 429 / auth)
-        let _ = translate_indexed_subset(cfg, &items, prev_context, title, false).await?;
+        let _ = translate_indexed_subset(cfg, &items, prev_context, title, false, Some(memory)).await?;
     }
 
     for round in 0..2 {
@@ -466,7 +555,7 @@ async fn translate_batch_exact(
         let max_chunk = if round == 0 { 15 } else { 8 };
         let chunk_size = missing.len().min(max_chunk).max(1);
         for sub in missing.chunks(chunk_size) {
-            if let Ok(pairs) = translate_indexed_subset(cfg, sub, prev_context, title, true).await {
+            if let Ok(pairs) = translate_indexed_subset(cfg, sub, prev_context, title, true, None).await {
                 for (idx, tr) in pairs {
                     if idx < batch.len() && !tr.trim().is_empty() {
                         batch[idx].translated = tr;
@@ -485,9 +574,10 @@ async fn translate_cue_batches(
     video_id: &str,
     latest_cfg: &AppConfig,
 ) -> Result<(), String> {
+    let mut memory = TranslationMemory::default();
     for batch in cues.chunks_mut(TRANSLATE_BATCH_SIZE) {
-        let prev_context = build_prev_context(translated_all);
-        translate_batch_exact(latest_cfg, batch, &prev_context, None).await?;
+        let prev_context = build_prev_context(translated_all, &memory);
+        translate_batch_exact(latest_cfg, batch, &prev_context, None, &mut memory).await?;
         for cue in batch.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
@@ -1446,6 +1536,7 @@ where
     let total_cues = cues.len().max(1);
     let remaining = &mut cues[resume_from..];
     let total_batches = remaining.len().div_ceil(TRANSLATE_BATCH_SIZE).max(1);
+    let mut memory = TranslationMemory::default();
 
     for (b_idx, chunk) in remaining.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
         let done_cues = resume_from + b_idx * TRANSLATE_BATCH_SIZE;
@@ -1454,8 +1545,8 @@ where
             pct,
             format!("Translating batch {}/{total_batches} ({pct}%)", b_idx + 1),
         );
-        let prev_context = build_prev_context(&translated_all);
-        translate_batch_exact(&latest_cfg, chunk, &prev_context, Some(title)).await?;
+        let prev_context = build_prev_context(&translated_all, &memory);
+        translate_batch_exact(&latest_cfg, chunk, &prev_context, Some(title), &mut memory).await?;
         for cue in chunk.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();

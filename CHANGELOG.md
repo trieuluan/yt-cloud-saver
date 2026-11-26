@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.29] - 2026-11-26
+
+### Improved
+- **Rolling Global Glossary & Context-Aware Homophone Guard:** Each translation batch now incrementally extracts and carries forward a global character/term glossary (up to 50 entries) plus a 1-line scene/pronoun note alongside the last 4 lines, preventing long-video character name drift and fixing ASR homophone misreads (e.g. `陈默` / `沉默`) strictly in person/vocative contexts without breaking normal literal lines.
+
 ## [1.2.28] - 2026-11-26
 
 ### Improved
