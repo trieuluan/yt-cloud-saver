@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.10] - 2026-11-26
+
+### Fixed
+- **Whisper Resume From Interrupted Chunk:** Marked partial Whisper raw transcription caches (`partial`, `completedChunks`, `totalChunks`) so resuming an interrupted job continues Whispering remaining audio chunks (and finishes any untranslated chunk tail) instead of jumping straight to translation with incomplete subtitles.
+
 ## [1.2.9] - 2026-11-26
 
 ### Fixed & Improved

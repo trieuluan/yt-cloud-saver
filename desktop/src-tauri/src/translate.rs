@@ -58,6 +58,12 @@ fn raw_cache_path(data_dir: &Path, video_id: &str) -> PathBuf {
 #[serde(rename_all = "camelCase")]
 struct RawCuesCache {
     source: String,
+    #[serde(default)]
+    partial: bool,
+    #[serde(default)]
+    completed_chunks: usize,
+    #[serde(default)]
+    total_chunks: usize,
     cues: Vec<SubtitleCue>,
 }
 
@@ -66,18 +72,105 @@ fn load_raw_cache(data_dir: &Path, video_id: &str) -> Option<RawCuesCache> {
     serde_json::from_str(&raw).ok()
 }
 
-fn save_raw_cache(data_dir: &Path, video_id: &str, source: &str, cues: &[SubtitleCue]) {
+fn save_raw_cache(
+    data_dir: &Path,
+    video_id: &str,
+    source: &str,
+    cues: &[SubtitleCue],
+    partial: bool,
+    completed_chunks: usize,
+    total_chunks: usize,
+) {
     let path = raw_cache_path(data_dir, video_id);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let cache = RawCuesCache {
         source: source.to_string(),
+        partial,
+        completed_chunks,
+        total_chunks,
         cues: cues.to_vec(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&cache) {
         let _ = fs::write(path, json);
     }
+}
+
+fn list_chunk_wavs(tmp_dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = fs::read_dir(tmp_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("wav"))
+        .collect();
+    files.sort();
+    files
+}
+
+fn parse_chunk_index(path: &Path) -> Option<usize> {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.strip_prefix("chunk_"))
+        .and_then(|s| s.parse::<usize>().ok())
+}
+
+async fn translate_cue_batches(
+    cues: &mut [SubtitleCue],
+    translated_all: &mut Vec<SubtitleCue>,
+    data_dir: &Path,
+    video_id: &str,
+    latest_cfg: &AppConfig,
+) -> Result<(), String> {
+    const BATCH_SIZE: usize = 100;
+    for batch in cues.chunks_mut(BATCH_SIZE) {
+        let lines: Vec<&str> = batch.iter().map(|c| c.original.as_str()).collect();
+        let prev_context = if translated_all.is_empty() {
+            String::new()
+        } else {
+            let tail_start = translated_all.len().saturating_sub(6);
+            let pairs: Vec<String> = translated_all[tail_start..]
+                .iter()
+                .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
+                .collect();
+            format!(
+                "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
+                pairs.join("\n")
+            )
+        };
+        let prompt = format!(
+            "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent).{}\nReturn ONLY a JSON array of strings with the exact same length ({}) in the same order.\n\n{}",
+            lines.len(),
+            latest_cfg.target_lang,
+            prev_context,
+            lines.len(),
+            serde_json::to_string(&lines).unwrap_or_default()
+        );
+        let reply = call_llm(latest_cfg, &prompt).await?;
+        if let Some(translated) = parse_json_string_array(&reply) {
+            for (cue, tr) in batch.iter_mut().zip(translated.into_iter()) {
+                cue.translated = tr;
+            }
+        }
+        for cue in batch.iter_mut() {
+            if cue.translated.is_empty() {
+                cue.translated = cue.original.clone();
+            }
+            translated_all.push(cue.clone());
+        }
+        let partial_bundle = SubtitleBundle {
+            video_id: video_id.to_string(),
+            title: video_id.to_string(),
+            target_lang: latest_cfg.target_lang.clone(),
+            source: "whisper".to_string(),
+            partial: true,
+            cues: translated_all.clone(),
+        };
+        save_cached_subtitles(data_dir, &partial_bundle);
+    }
+    Ok(())
 }
 
 pub fn load_cached_subtitles(
@@ -335,53 +428,59 @@ where
     let ytdlp = find_binary("yt-dlp", bin_dir)
         .ok_or_else(|| "yt-dlp is not installed".to_string())?;
     let tmp_dir = PathBuf::from(&config.temp_dir).join(format!("sub_{video_id}"));
-    let _ = fs::remove_dir_all(&tmp_dir);
+    let existing_raw = load_raw_cache(data_dir, video_id)
+        .filter(|r| r.partial && r.source == "whisper");
+    if existing_raw.is_none() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
     fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
 
-    let out_tmpl = tmp_dir.join("sub").to_string_lossy().to_string();
-    let mut args = vec![
-        "--skip-download".to_string(),
-        "--no-playlist".to_string(),
-        "--write-subs".to_string(),
-    ];
-    if !(config.prefer_whisper_over_auto_cc && config.use_whisper_fallback) {
-        args.push("--write-auto-subs".to_string());
-    }
-    args.extend([
-        "--sub-format".to_string(),
-        "vtt".to_string(),
-        "--sub-langs".to_string(),
-        "en.*,en,ja,ko,zh.*,vi".to_string(),
-        "-o".to_string(),
-        out_tmpl,
-    ]);
-    if !config.cookies_browser.is_empty() {
-        args.push("--cookies-from-browser".to_string());
-        args.push(config.cookies_browser.clone());
-    }
-    args.push(url.to_string());
+    if existing_raw.is_none() {
+        let out_tmpl = tmp_dir.join("sub").to_string_lossy().to_string();
+        let mut args = vec![
+            "--skip-download".to_string(),
+            "--no-playlist".to_string(),
+            "--write-subs".to_string(),
+        ];
+        if !(config.prefer_whisper_over_auto_cc && config.use_whisper_fallback) {
+            args.push("--write-auto-subs".to_string());
+        }
+        args.extend([
+            "--sub-format".to_string(),
+            "vtt".to_string(),
+            "--sub-langs".to_string(),
+            "en.*,en,ja,ko,zh.*,vi".to_string(),
+            "-o".to_string(),
+            out_tmpl,
+        ]);
+        if !config.cookies_browser.is_empty() {
+            args.push("--cookies-from-browser".to_string());
+            args.push(config.cookies_browser.clone());
+        }
+        args.push(url.to_string());
 
-    let _ = Command::new(&ytdlp)
-        .args(&args)
-        .env("PATH", build_env_path(bin_dir))
-        .output()
-        .await;
+        let _ = Command::new(&ytdlp)
+            .args(&args)
+            .env("PATH", build_env_path(bin_dir))
+            .output()
+            .await;
 
-    let vtt_file = fs::read_dir(&tmp_dir)
-        .ok()
-        .and_then(|entries| {
-            entries
-                .flatten()
-                .map(|e| e.path())
-                .find(|p| p.extension().and_then(|e| e.to_str()) == Some("vtt"))
-        });
+        let vtt_file = fs::read_dir(&tmp_dir)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .find(|p| p.extension().and_then(|e| e.to_str()) == Some("vtt"))
+            });
 
-    if let Some(vtt_path) = vtt_file {
-        let raw = fs::read_to_string(&vtt_path).unwrap_or_default();
-        let cues = parse_vtt_or_srt(&raw);
-        let _ = fs::remove_dir_all(&tmp_dir);
-        if !cues.is_empty() {
-            return Ok(("youtube-cc".to_string(), cues));
+        if let Some(vtt_path) = vtt_file {
+            let raw = fs::read_to_string(&vtt_path).unwrap_or_default();
+            let cues = parse_vtt_or_srt(&raw);
+            let _ = fs::remove_dir_all(&tmp_dir);
+            if !cues.is_empty() {
+                return Ok(("youtube-cc".to_string(), cues));
+            }
         }
     }
 
@@ -399,85 +498,105 @@ where
 
     let ffmpeg = find_binary("ffmpeg", bin_dir)
         .ok_or_else(|| "ffmpeg is required for whisper transcription".to_string())?;
+    let mut chunk_files = if existing_raw.is_some() {
+        list_chunk_wavs(&tmp_dir)
+    } else {
+        Vec::new()
+    };
 
-    let audio_raw = tmp_dir.join("audio.m4a");
-    let mut dl_args = vec![
-        "--newline".to_string(),
-        "--no-playlist".to_string(),
-        "-f".to_string(),
-        "ba[ext=m4a]/ba".to_string(),
-        "-o".to_string(),
-        audio_raw.to_string_lossy().to_string(),
-    ];
-    if !config.cookies_browser.is_empty() {
-        dl_args.push("--cookies-from-browser".to_string());
-        dl_args.push(config.cookies_browser.clone());
-    }
-    dl_args.push(url.to_string());
+    if chunk_files.is_empty() {
+        let audio_raw = tmp_dir.join("audio.m4a");
+        let mut dl_args = vec![
+            "--newline".to_string(),
+            "--no-playlist".to_string(),
+            "-f".to_string(),
+            "ba[ext=m4a]/ba".to_string(),
+            "-o".to_string(),
+            audio_raw.to_string_lossy().to_string(),
+        ];
+        if !config.cookies_browser.is_empty() {
+            dl_args.push("--cookies-from-browser".to_string());
+            dl_args.push(config.cookies_browser.clone());
+        }
+        dl_args.push(url.to_string());
 
-    on_progress(6, "Downloading audio...".to_string());
-    let mut dl_child = Command::new(&ytdlp)
-        .args(&dl_args)
-        .env("PATH", build_env_path(bin_dir))
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("Failed to download audio: {e}"))?;
+        on_progress(6, "Downloading audio...".to_string());
+        let mut dl_child = Command::new(&ytdlp)
+            .args(&dl_args)
+            .env("PATH", build_env_path(bin_dir))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("Failed to download audio: {e}"))?;
 
-    if let Some(stdout) = dl_child.stdout.take() {
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(idx) = line.find("[download]") {
-                if let Some(pct_idx) = line[idx + 10..].find('%') {
-                    if let Some(num) = line[idx + 10..idx + 10 + pct_idx].trim().split_whitespace().last() {
-                        if let Ok(val) = num.parse::<f64>() {
-                            let p = 6 + ((val.clamp(0.0, 100.0) * 0.14) as u8);
-                            on_progress(p, format!("Downloading audio {}%", val.round() as u8));
+        if let Some(stdout) = dl_child.stdout.take() {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(idx) = line.find("[download]") {
+                    if let Some(pct_idx) = line[idx + 10..].find('%') {
+                        if let Some(num) = line[idx + 10..idx + 10 + pct_idx].trim().split_whitespace().last() {
+                            if let Ok(val) = num.parse::<f64>() {
+                                let p = 6 + ((val.clamp(0.0, 100.0) * 0.14) as u8);
+                                on_progress(p, format!("Downloading audio {}%", val.round() as u8));
+                            }
                         }
                     }
                 }
             }
         }
+
+        let dl_out = dl_child
+            .wait_with_output()
+            .await
+            .map_err(|e| format!("Failed to download audio: {e}"))?;
+
+        if !dl_out.status.success() || !audio_raw.is_file() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            return Err("Failed to download audio for Whisper".to_string());
+        }
+
+        on_progress(20, "Preparing audio chunks...".to_string());
+
+        let seg_pattern = tmp_dir.join("chunk_%03d.wav");
+        let ff_out = Command::new(&ffmpeg)
+            .args([
+                "-y",
+                "-i",
+                &audio_raw.to_string_lossy(),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "segment",
+                "-segment_time",
+                "1800",
+                &seg_pattern.to_string_lossy(),
+            ])
+            .output()
+            .await
+            .map_err(|e| format!("ffmpeg failed: {e}"))?;
+
+        if !ff_out.status.success() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            return Err("Failed to convert audio to 16kHz WAV chunks".to_string());
+        }
+        let _ = fs::remove_file(&audio_raw);
+
+        chunk_files = list_chunk_wavs(&tmp_dir);
+        if let Some(ref raw) = existing_raw {
+            chunk_files.retain(|p| {
+                let keep = parse_chunk_index(p).unwrap_or(0) >= raw.completed_chunks;
+                if !keep {
+                    let _ = fs::remove_file(p);
+                }
+                keep
+            });
+        }
+    } else {
+        on_progress(20, "Resuming Whisper from remaining audio chunks...".to_string());
     }
-
-    let dl_out = dl_child
-        .wait_with_output()
-        .await
-        .map_err(|e| format!("Failed to download audio: {e}"))?;
-
-    if !dl_out.status.success() || !audio_raw.is_file() {
-        let _ = fs::remove_dir_all(&tmp_dir);
-        return Err("Failed to download audio for Whisper".to_string());
-    }
-
-    on_progress(20, "Preparing audio chunks...".to_string());
-
-    let seg_pattern = tmp_dir.join("chunk_%03d.wav");
-    let ff_out = Command::new(&ffmpeg)
-        .args([
-            "-y",
-            "-i",
-            &audio_raw.to_string_lossy(),
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-f",
-            "segment",
-            "-segment_time",
-            "1800",
-            &seg_pattern.to_string_lossy(),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("ffmpeg failed: {e}"))?;
-
-    if !ff_out.status.success() {
-        let _ = fs::remove_dir_all(&tmp_dir);
-        return Err("Failed to convert audio to 16kHz WAV chunks".to_string());
-    }
-    let _ = fs::remove_file(&audio_raw);
 
     let model_name = if config.whisper_model.is_empty() {
         "small"
@@ -492,31 +611,49 @@ where
         ));
     }
 
-    let mut chunk_files: Vec<PathBuf> = fs::read_dir(&tmp_dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("wav"))
-        .collect();
-    chunk_files.sort();
-
-    if chunk_files.is_empty() {
+    if chunk_files.is_empty() && existing_raw.is_none() {
         let _ = fs::remove_dir_all(&tmp_dir);
         return Err("No audio chunks produced by ffmpeg".to_string());
     }
 
     const CHUNK_MS: u64 = 1800 * 1000;
-    let total_chunks = chunk_files.len();
-    let mut translated_all: Vec<SubtitleCue> = Vec::new();
-    let mut raw_all: Vec<SubtitleCue> = Vec::new();
+    let total_chunks = existing_raw
+        .as_ref()
+        .map(|r| r.total_chunks)
+        .filter(|&n| n > 0)
+        .unwrap_or(chunk_files.len())
+        .max(chunk_files.len());
+    let mut raw_all: Vec<SubtitleCue> = existing_raw
+        .as_ref()
+        .map(|r| r.cues.clone())
+        .unwrap_or_default();
+    let mut translated_all: Vec<SubtitleCue> = load_cached_subtitles(data_dir, video_id, &config.target_lang)
+        .filter(|b| b.partial)
+        .map(|b| b.cues)
+        .unwrap_or_default();
+
+    if translated_all.len() < raw_all.len() {
+        let latest_cfg = load_config(data_dir);
+        let start_idx = translated_all.len();
+        on_progress(22, "Resuming translation of already transcribed chunk...".to_string());
+        translate_cue_batches(
+            &mut raw_all[start_idx..],
+            &mut translated_all,
+            data_dir,
+            video_id,
+            &latest_cfg,
+        )
+        .await?;
+    }
 
     for (idx, chunk_wav) in chunk_files.iter().enumerate() {
-        let base_pct = 20 + (((idx * 75) / total_chunks.max(1)) as u8);
+        let chunk_idx = parse_chunk_index(chunk_wav).unwrap_or(idx);
+        let base_pct = 20 + (((chunk_idx * 75) / total_chunks.max(1)) as u8);
         on_progress(
             base_pct,
-            format!("Whisper chunk {}/{total_chunks} ({base_pct}%)", idx + 1),
+            format!("Whisper chunk {}/{total_chunks} ({base_pct}%)", chunk_idx + 1),
         );
-        let srt_prefix = tmp_dir.join(format!("whisper_out_{idx:03}"));
+        let srt_prefix = tmp_dir.join(format!("whisper_out_{chunk_idx:03}"));
         let wh_out = Command::new(&whisper)
             .args([
                 "-m",
@@ -538,10 +675,9 @@ where
             .await
             .map_err(|e| format!("whisper-cli failed: {e}"))?;
 
-        let srt_path = tmp_dir.join(format!("whisper_out_{idx:03}.srt"));
+        let srt_path = tmp_dir.join(format!("whisper_out_{chunk_idx:03}.srt"));
         if !wh_out.status.success() || !srt_path.is_file() {
             let err = String::from_utf8_lossy(&wh_out.stderr).trim().to_string();
-            let _ = fs::remove_dir_all(&tmp_dir);
             return Err(if err.is_empty() {
                 "Whisper transcription failed".to_string()
             } else {
@@ -550,7 +686,7 @@ where
         }
 
         let srt_raw = fs::read_to_string(&srt_path).unwrap_or_default();
-        let offset_ms = (idx as u64) * CHUNK_MS;
+        let offset_ms = (chunk_idx as u64) * CHUNK_MS;
         let mut raw_chunk_cues = Vec::new();
         for mut cue in parse_vtt_or_srt(&srt_raw) {
             cue.start_ms += offset_ms;
@@ -562,69 +698,40 @@ where
             chunk_wav,
             offset_ms,
             &tmp_dir,
-            idx,
+            chunk_idx,
             &whisper,
             &ffmpeg,
             &model_path,
             bin_dir,
         )
         .await;
-        let _ = fs::remove_file(chunk_wav);
         raw_all.extend(chunk_cues.clone());
-        save_raw_cache(data_dir, video_id, "whisper", &raw_all);
+        let completed_chunks = chunk_idx + 1;
+        save_raw_cache(
+            data_dir,
+            video_id,
+            "whisper",
+            &raw_all,
+            completed_chunks < total_chunks,
+            completed_chunks,
+            total_chunks,
+        );
+        let _ = fs::remove_file(chunk_wav);
 
         let latest_cfg = load_config(data_dir);
-        let tr_pct = 20 + ((((idx * 75) + 40) / total_chunks.max(1)) as u8).min(78);
+        let tr_pct = 20 + ((((chunk_idx * 75) + 40) / total_chunks.max(1)) as u8).min(78);
         on_progress(
             tr_pct,
-            format!("Translating chunk {}/{total_chunks} ({tr_pct}%)", idx + 1),
+            format!("Translating chunk {}/{total_chunks} ({tr_pct}%)", chunk_idx + 1),
         );
-        const BATCH_SIZE: usize = 100;
-        for batch in chunk_cues.chunks_mut(BATCH_SIZE) {
-            let lines: Vec<&str> = batch.iter().map(|c| c.original.as_str()).collect();
-            let prev_context = if translated_all.is_empty() {
-                String::new()
-            } else {
-                let tail_start = translated_all.len().saturating_sub(6);
-                let pairs: Vec<String> = translated_all[tail_start..]
-                    .iter()
-                    .map(|c| format!("- \"{}\" => \"{}\"", c.original, c.translated))
-                    .collect();
-                format!(
-                    "\nPrevious context (for consistent pronouns/tone, DO NOT include in output):\n{}\n",
-                    pairs.join("\n")
-                )
-            };
-            let prompt = format!(
-                "Translate these {} movie subtitle lines into natural {} suitable for spoken dialogue (keep pronouns/tone consistent).{}\nReturn ONLY a JSON array of strings with the exact same length ({}) in the same order.\n\n{}",
-                lines.len(),
-                latest_cfg.target_lang,
-                prev_context,
-                lines.len(),
-                serde_json::to_string(&lines).unwrap_or_default()
-            );
-            let reply = call_llm(&latest_cfg, &prompt).await?;
-            if let Some(translated) = parse_json_string_array(&reply) {
-                for (cue, tr) in batch.iter_mut().zip(translated.into_iter()) {
-                    cue.translated = tr;
-                }
-            }
-            for cue in batch.iter_mut() {
-                if cue.translated.is_empty() {
-                    cue.translated = cue.original.clone();
-                }
-                translated_all.push(cue.clone());
-            }
-            let partial_bundle = SubtitleBundle {
-                video_id: video_id.to_string(),
-                title: video_id.to_string(),
-                target_lang: latest_cfg.target_lang.clone(),
-                source: "whisper".to_string(),
-                partial: true,
-                cues: translated_all.clone(),
-            };
-            save_cached_subtitles(data_dir, &partial_bundle);
-        }
+        translate_cue_batches(
+            &mut chunk_cues,
+            &mut translated_all,
+            data_dir,
+            video_id,
+            &latest_cfg,
+        )
+        .await?;
     }
 
     let _ = fs::remove_dir_all(&tmp_dir);
@@ -851,15 +958,18 @@ where
         }
     }
 
-    let (source, mut cues) = if let Some(raw) = load_raw_cache(data_dir, video_id) {
-        on_progress(50, "Loaded cached transcription, resuming translation...".to_string());
-        (raw.source, raw.cues)
-    } else {
-        on_progress(5, "Checking YouTube captions...".to_string());
-        let (src, extracted) =
-            extract_raw_cues(data_dir, bin_dir, config, url, video_id, &on_progress).await?;
-        save_raw_cache(data_dir, video_id, &src, &extracted);
-        (src, extracted)
+    let (source, mut cues) = match load_raw_cache(data_dir, video_id) {
+        Some(raw) if !raw.partial => {
+            on_progress(50, "Loaded cached transcription, resuming translation...".to_string());
+            (raw.source, raw.cues)
+        }
+        _ => {
+            on_progress(5, "Checking YouTube captions...".to_string());
+            let (src, extracted) =
+                extract_raw_cues(data_dir, bin_dir, config, url, video_id, &on_progress).await?;
+            save_raw_cache(data_dir, video_id, &src, &extracted, false, 0, 0);
+            (src, extracted)
+        }
     };
 
     // If extract_raw_cues already translated each chunk progressively, skip re-translating already translated cues
@@ -1032,7 +1142,7 @@ pub fn prepare_retranslate_from_cache(
         })
         .collect();
     if !raw_cues.is_empty() {
-        save_raw_cache(data_dir, &bundle.video_id, &bundle.source, &raw_cues);
+        save_raw_cache(data_dir, &bundle.video_id, &bundle.source, &raw_cues, false, 0, 0);
     }
     let _ = fs::remove_file(&path);
     Ok((bundle.video_id, bundle.title))
