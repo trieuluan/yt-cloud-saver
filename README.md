@@ -5,7 +5,7 @@
 <h1 align="center">YT Cloud Saver</h1>
 
 <p align="center">
-  Save YouTube videos straight to <b>Google Drive</b> (or any <code>rclone</code> cloud) in 1 click, with <b>AI Bilingual Subtitles</b>, <b>2-Pass Speaker Diarization</b>, <b>Auto Multi-Voice Offline Dubbing (VieNeu-TTS / Edge TTS)</b>, <b>Whisper (Local &amp; Cloud)</b>, and instant inline Cloud playback.
+  Save YouTube videos straight to <b>Google Drive</b> (or any <code>rclone</code> cloud) in 1 click — with modular <b>Real-Time AI Subtitles</b>, <b>Local/Cloud Whisper STT</b>, <b>YAMNet Music Filtering</b>, <b>WeSpeaker Male/Female Diarization</b>, and <b>Auto Multi-Voice Dubbing (Edge TTS &amp; Offline VieNeu-TTS)</b>.
 </p>
 
 <p align="center">
@@ -13,78 +13,109 @@
   <img src="https://img.shields.io/badge/Desktop%20App-Tauri%20v2-24C8DB?logo=tauri&logoColor=white" alt="Tauri v2">
   <img src="https://img.shields.io/badge/AI%20Subtitles-Gemini%20%7C%20OpenAI%20%7C%20Ollama-8B5CF6" alt="AI Subtitles">
   <img src="https://img.shields.io/badge/Audio%20AI-Whisper%20%7C%20YAMNet%20%7C%20WeSpeaker-F59E0B" alt="Audio AI">
-  <img src="https://img.shields.io/badge/TTS%20Dubbing-VieNeu--TTS%20%7C%20Edge%20TTS-10B981" alt="TTS Dubbing">
+  <img src="https://img.shields.io/badge/TTS%20Dubbing-Edge%20TTS%20%7C%20VieNeu--TTS-10B981" alt="TTS Dubbing">
   <img src="https://img.shields.io/badge/Cloud-Google%20Drive%20%7C%20rclone-34A853?logo=googledrive&logoColor=white" alt="Google Drive">
 </p>
 
 ---
 
-## Demo & Walkthrough
+## Interactive Feature Walkthrough
 
 <p align="center">
-  <img src="docs/demo.gif" alt="YT Cloud Saver Interactive Walkthrough" width="94%">
+  <img src="docs/demo.gif" alt="YT Cloud Saver Complete Feature Guide" width="96%">
 </p>
 
 <p align="center">
-  <a href="docs/demo.mp4"><b>▶ Watch Full Walkthrough Video with Vietnamese Voiceover (<code>docs/demo.mp4</code> · 921 KB)</b></a>
-</p>
-
-### 1. YouTube Player (`AI CC` · `Dub` · `Saved ✓ ▾` Cloud Menu)
-<p align="center">
-  <img src="docs/preview-youtube.png" alt="YT Cloud Saver on YouTube with Bilingual Subtitles & Cloud Menu" width="92%">
-</p>
-
-### 2. Extension Popup (`VieNeu-TTS` · `Auto Multi-Voice` · `Dub Voice Boost 200%`)
-<p align="center">
-  <img src="docs/preview-popup.png" alt="YT Cloud Saver Extension Popup with Auto Multi-Voice" width="92%">
-</p>
-
-### 3. Desktop App — `AI & Translate` (`Gemini Thinking: 0` · `YAMNet` · `WeSpeaker` · `VieNeu-TTS`)
-<p align="center">
-  <img src="docs/preview-desktop-ai.png" alt="YT Cloud Saver AI & Translate Settings" width="92%">
-</p>
-
-### 4. Desktop App — `Activity` & Subtitle Library (Real macOS App)
-<p align="center">
-  <img src="docs/preview-desktop.png" alt="YT Cloud Saver Desktop App Activity" width="60%">
+  <a href="docs/demo.mp4"><b>▶ Watch Full Walkthrough Video with VieNeu-TTS Voiceover &amp; English Subtitles (<code>docs/demo.mp4</code>)</b></a>
 </p>
 
 ---
 
-## How the AI Pipeline Works
+## Modular Feature Guide — Enable Only What You Need
+
+Every AI and audio add-on in **YT Cloud Saver** is **modular**: install only the components you want, uncheck or click **`Remove`** anytime to free disk space, and core features continue working seamlessly.
+
+### 1. Want to Save &amp; Stream Videos to Cloud? → Connect Google Drive
+- Open **`Cloud & Settings`** and click **`Connect`** for 1-click Google Drive sign-in (or enter any `rclone` remote path).
+- Customize your **Destination Folder**, toggle **Organize into folders by channel**, pick **Video Quality** (`Best MP4 / 1080p / 720p`), and optionally enable **Browser Cookies** for restricted videos.
+- On YouTube, click **`Save to Cloud`** — once archived, click **`Saved ✓ ▾ → Play from Cloud`** to stream directly inside YouTube with zero local disk cache.
+
+<p align="center">
+  <img src="docs/preview-cloud-settings.png" alt="Cloud & Settings — Connect Google Drive" width="94%">
+</p>
+
+### 2. Want Real-Time Translated Subtitles? → Connect an AI Provider
+- Open **`AI & Translate`** and pick any provider:
+  - **Gemini** (`gemini-3.8-flash` / `flash-lite`) — set **Gemini Thinking** to **`Off (0)`** to cut output token costs by ~90%.
+  - **OpenAI / Custom** — works with OpenAI, OpenRouter, DeepSeek, Groq, Together, or any OpenAI-compatible endpoint.
+  - **Ollama (Local)** — 100% free offline translation using local models on your machine.
+
+<p align="center">
+  <img src="docs/preview-desktop-ai.png" alt="AI Translation Providers & Gemini Thinking Control" width="94%">
+</p>
+
+### 3. Video Has No Captions? → Enable Speech-to-Text (`Whisper · Local or Cloud`)
+- Toggle **`Speech-to-Text (Whisper · Local / Cloud)`** so videos without YouTube CC are transcribed automatically (with built-in repetition/hallucination cleanup):
+  - **`🖥 Local (whisper-cli)`:** 1-click install of `whisper.cpp` + Silero VAD and model choices from `tiny` (~75 MB) up to `large-v3-turbo`. Click **`Remove`** anytime if you don't need local models.
+  - **`☁️ Cloud API (Groq / OpenAI)`:** Offload transcription to Groq's fast cloud Whisper (`whisper-large-v3-turbo`) or OpenAI with zero local CPU/RAM load.
+
+<p align="center">
+  <img src="docs/preview-whisper.png" alt="Whisper Local & Cloud Speech-to-Text" width="94%">
+</p>
+
+### 4. Want to Skip Song Lyrics &amp; Separate Male/Female Voices? → `YAMNet` &amp; `WeSpeaker`
+- **`Skip Music & Singing (YAMNet)`:** Downloads `yamnet.onnx` (~15.4 MB) to mute background music and singing segments (`Low / Balanced / High`) before Whisper transcribes, preventing unwanted song lyrics in subtitles.
+- **`Speaker & Gender Hints (WeSpeaker)`:** Downloads `wespeaker_voxceleb.onnx` (~25.3 MB) + F0 pitch analysis for **2-Pass Agglomerative Speaker Clustering** (`M:A`, `F:B`, `F:C`...), giving the LLM gender-accurate pronoun hints and powering Multi-Voice dubbing.
+- Both add-ons are completely optional — uncheck them or click **`Remove`** anytime without affecting normal translation.
+
+<p align="center">
+  <img src="docs/preview-audio-ai.png" alt="YAMNet Music Filter & WeSpeaker Speaker Diarization" width="94%">
+</p>
+
+### 5. Want Live Voiceover Dubbing? → `Edge TTS` (Online) or `VieNeu-TTS` (Offline)
+- **`☁️ Edge TTS (Online)`:** Ready out of the box (`0 MB` download), multi-language neural voices with automatic macOS system voice fallback.
+- **`🖥 Local Offline (VieNeu-TTS)`:** Click **`Install`** to set up the local runtime (`uv + vieneu`) and download quantized model variants optimized for Apple Silicon / CPU — featuring natural Northern/Central/Southern Vietnamese voices plus **Custom Voice Cloning** from a 3–8s `.wav/.mp3` sample (with 1-click **`Remove`** anytime).
+
+<p align="center">
+  <img src="docs/preview-tts-vieneu.png" alt="Edge TTS Online & VieNeu-TTS Offline Voice Cloning" width="94%">
+</p>
+
+### 6. Watch on YouTube, Enable Auto Multi-Voice &amp; Manage Subtitles
+- Right inside YouTube's player bar, toggle **`AI CC`** (`OFF → Bilingual → Translated`) and **`Dub`** (`ON / OFF`).
+- Open the **Extension Popup** (`Subtitles & Dub` tab) to switch between **`Edge AI` / `VieNeu` / `Browser`**, enable **`🎭 Auto Multi-Voice`** (automatically assigns Female `F` & Male `M` lead voices and rotates secondary speakers `F:C`, `M:D`...), adjust **Speed** & **Original Vol**, boost voice clarity up to **`200%`**, and customize subtitle font size, colors, and opacity.
+- In the Desktop **`Activity`** tab, track cloud/translation jobs, click **`↻ Re-run ▾`** (`Re-translate Only` or `Re-whisper + Translate`), **`Export .srt ▾`** (`Translated / Original / Bilingual`), or backup/restore subtitles to Google Drive.
+
+<p align="center">
+  <img src="docs/preview-youtube.png" alt="YouTube Player with Bilingual Subtitles, AI CC & Dub" width="94%">
+</p>
+
+<p align="center">
+  <img src="docs/preview-popup.png" alt="Extension Popup — Auto Multi-Voice & Dub Voice Boost" width="94%">
+</p>
+
+<p align="center">
+  <img src="docs/preview-desktop.png" alt="Desktop App Activity & Subtitle Library" width="62%">
+</p>
+
+---
+
+## AI Audio &amp; Translation Pipeline
 
 ```text
-YouTube Audio ─► YAMNet ONNX (Mute Music/Singing)
+YouTube Audio ─► [Optional] YAMNet ONNX (Mute Music & Singing)
                       │
                       ▼
-             Whisper (Local VAD / Cloud Groq) + Hallucination Filter
+             Whisper STT (Local whisper.cpp + VAD  OR  Cloud Groq / OpenAI)
                       │
                       ▼
-             WeSpeaker ONNX + F0 (2-Pass AHC Speaker & Gender Hints: M:A, F:B...)
+             [Optional] WeSpeaker ONNX + F0 (2-Pass AHC Speaker & Gender Tags: M:A, F:B...)
                       │
                       ▼
              LLM Translation (Gemini Thinking=0 / OpenAI / Ollama)
                       │
                       ▼
-             Auto Multi-Voice Dubbing (VieNeu-TTS Offline / Edge TTS + 200% Boost)
+             Live Dubbing (Edge TTS Online  OR  VieNeu-TTS Offline + Auto Multi-Voice + 200% Boost)
 ```
-
----
-
-## Features
-
-| Feature | Description |
-| :--- | :--- |
-| **1-Click Save &amp; Cloud Menu** | Adds a single **`Save to Cloud`** / **`Saved ✓ ▾`** pill next to Like &amp; Share with **Play from Cloud** (inline), **Re-save / Update**, and **Remove from Cloud** (2-step confirm). |
-| **Native Player Bar (`AI CC` + `Dub`)** | Integrates **`AI CC`** (cycles `OFF → Bilingual → Translated`) and **`Dub`** directly into YouTube's bottom-right control bar (`.ytp-right-controls`), auto-hiding with the player controls. |
-| **AI Subtitles + Whisper (Local &amp; Cloud)** | Translates YouTube transcripts via **Gemini**, **OpenAI / OpenRouter**, or **Ollama** with **Gemini Thinking Budget** control (`0` / `1024` / `-1`, saving ~90% output tokens). Falls back to chunked **`whisper.cpp` + Silero VAD** or **Cloud Whisper (Groq / OpenAI)** for videos without captions, with progressive loading, **`↻ Re-run ▾`**, auto-fetched video titles, and **`Export .srt ▾`** (**Translated / Original / Bilingual**). |
-| **YAMNet ONNX Music &amp; Singing Filter** | Automatically detects and mutes background music and singing segments before Whisper transcription using `yamnet.onnx` with 3 sensitivity presets (**Low / Balanced / High**). |
-| **2-Pass Speaker Diarization &amp; Gender Hints** | Uses **WeSpeaker ONNX** (`wespeaker_voxceleb.onnx`), **F0 pitch estimation**, and **YAMNet** voting with 2-Pass **Agglomerative Clustering (AHC)** to group speakers (`M:A`, `F:B`, `F:C`...) and pass character gender hints to the LLM for accurate Vietnamese pronouns. |
-| **Auto Multi-Voice Dubbing (VieNeu-TTS &amp; Edge)** | **VieNeu-TTS** (local offline Vietnamese neural TTS with 4 Female + 4 Male voices + **Custom Voice Cloning** from 3–15s reference audio) alongside **Edge Neural TTS** and **Browser TTS**. Automatically switches and rotates voices per character (`M:A`, `F:B`, `F:C`, `M:D`...), with 24-cue lookahead prefetching, **Dub Voice Boost (`100–200%`)**, and **Smart Vocal Ducking** (borrows up to 1.2s of trailing silence). |
-| **Subtitle Customizer (Popup)** | Two-tab Extension Popup (`Subtitles & Dub` + `Cloud & Jobs`) with live preview, 2-way **Display Mode** sync, size (`12–32px`), text/background colors, opacity (`0–100%`), Female/Male voice selectors, speed (`0.7x–2.0x`), original volume, and Dub Voice Boost. |
-| **Fast Inline Cloud Player** | Streams saved MP4s from Google Drive right inside the YouTube player frame via `rclone serve http` range proxy (zero disk cache, 15-min idle auto-stop) with a YouTube-style control bar and `✕ YouTube` switch-back. |
-| **Subtitle Backup &amp; Restore** | Automatically backs up cached subtitles to `<Remote>/_ytcs_subtitles/` after translation, with **`↑ Backup Subs`** and **`↓ Restore Subs`** buttons when Drive is connected. |
-| **Auto-Organize &amp; Sync** | Organizes downloads into `<Destination>/<Channel Name>/`, supports browser cookies for restricted videos, and syncs `Saved ✓` status across devices via `↻ Sync Drive`. |
 
 ### Keyboard Shortcuts (YouTube &amp; Cloud Player)
 
@@ -96,7 +127,7 @@ YouTube Audio ─► YAMNet ONNX (Mute Music/Singing)
 
 ---
 
-## Installation (For Everyone)
+## Installation
 
 ### Step 1: Install Desktop App &amp; Connect Google Drive
 1. Download the installer for your OS from the [**Latest Release**](../../releases/latest):
@@ -105,40 +136,27 @@ YouTube Audio ─► YAMNet ONNX (Mute Music/Singing)
      > ```bash
      > xattr -cr "/Applications/YT Cloud Saver.app"
      > ```
-   - **Windows:** `.exe` / `.msi`
-     > **Windows Note:** Because the app is not signed with a paid EV certificate, Windows SmartScreen may show *"Windows protected your PC"*. Click **More info → Run anyway** to install.
+   - **Windows:** `.exe` / `.msi` *(Click **More info → Run anyway** if SmartScreen prompts).*
    - **Linux:** `.AppImage` / `.deb`
-2. Open **YT Cloud Saver** — if `yt-dlp`, `ffmpeg`, or `rclone` are missing, click **Download Missing Tools** right inside the app (no terminal needed).
-3. Go to **Cloud &amp; Settings** and click **Connect** to sign in to Google Drive in your browser.
-4. *(Optional)* Go to **AI &amp; Translate** to configure **Gemini / OpenAI / Ollama**, download **Whisper**, **YAMNet**, **WeSpeaker**, or install **VieNeu-TTS** in 1 click.
+2. Open **YT Cloud Saver** — if `yt-dlp`, `ffmpeg`, or `rclone` are missing, click **Download Missing Tools** right inside the app.
+3. Configure only the features you want in **Cloud &amp; Settings** and **AI &amp; Translate**.
 
 ### Step 2: Install the Chrome Extension
 1. Click **Extension Guide** at the bottom-right of the Desktop App, then click **1. Open Extension Folder** and **2. Open `chrome://extensions`** *(or download `yt-cloud-saver-extension.zip` from the [**Latest Release**](../../releases/latest))*.
-2. Enable **Developer mode** (top right) in Chrome.
-3. Drag &amp; drop the highlighted `extension` folder onto the Chrome Extensions page (or click **Load unpacked**).
-
-### Step 3: Save, Translate &amp; Dub
-- Open any YouTube video and click **Save to Cloud** to archive it, or toggle **`AI CC`** / **`Dub`** directly in the YouTube player bar.
-- Open the Extension Popup to switch between **VieNeu**, **Edge AI**, and **Browser TTS**, or enable **Auto Multi-Voice** for character-aware dubbing.
+2. Enable **Developer mode** (top right) in Chrome and drag &amp; drop the `extension` folder onto the page.
 
 ---
 
 ## Development
 
-### Desktop App (Tauri v2)
 ```bash
-cd desktop/src-tauri
-cargo run
-```
+# Desktop App (Tauri v2)
+cd desktop/src-tauri && cargo run
 
-### Package Extension ZIP
-```bash
+# Package Chrome Extension ZIP
 ./scripts/package.sh
-```
 
-### Standalone Node.js Server (Optional CLI Mode)
-If you prefer running the companion server without the Tauri UI:
-```bash
+# Optional Standalone Node.js Companion Server
 node server/index.js
 ```
 
