@@ -29,6 +29,10 @@ pub struct SubtitleBundle {
     pub source: String, // "youtube-cc" | "whisper"
     #[serde(default)]
     pub partial: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub glossary: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scene_note: String,
     pub cues: Vec<SubtitleCue>,
 }
 
@@ -319,6 +323,24 @@ struct TranslationMemory {
 }
 
 impl TranslationMemory {
+    fn from_bundle(bundle: &SubtitleBundle) -> Self {
+        Self {
+            glossary: bundle
+                .glossary
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            scene_note: bundle.scene_note.clone(),
+        }
+    }
+
+    fn to_glossary_map(&self) -> BTreeMap<String, String> {
+        self.glossary
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     fn merge(&mut self, new_entries: BTreeMap<String, String>, new_scene: Option<String>) {
         for (k, v) in new_entries {
             let src = k.trim().to_string();
@@ -328,7 +350,7 @@ impl TranslationMemory {
             }
             if let Some(existing) = self.glossary.iter_mut().find(|(s, _)| s == &src) {
                 existing.1 = dst;
-            } else if self.glossary.len() < 50 {
+            } else if self.glossary.len() < 80 {
                 self.glossary.push((src, dst));
             }
         }
@@ -386,13 +408,45 @@ fn build_prev_context(translated_all: &[SubtitleCue], memory: &TranslationMemory
     }
 }
 
-fn is_hallucination_token(s: &str) -> bool {
-    let t = s.trim();
-    if t.is_empty() {
-        return false;
+fn strip_hallucination_punct(s: &str) -> &str {
+    s.trim_matches(|c: char| {
+        c.is_whitespace()
+            || c.is_ascii_punctuation()
+            || matches!(c, '。' | '，' | '？' | '！' | '…' | '、' | '·' | '～' | '—')
+    })
+}
+
+fn collapse_char_stutter(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        let mut j = i + 1;
+        while j < chars.len() && chars[j] == ch {
+            j += 1;
+        }
+        let run = j - i;
+        if run >= 4 && ch.is_alphabetic() {
+            // Collapse Whisper 4+ char stutter (e.g. "啊啊啊啊啊啊快十八号了" -> "啊快十八号了")
+            out.push(ch);
+        } else {
+            for _ in 0..run {
+                out.push(ch);
+            }
+        }
+        i = j;
     }
-    let char_cnt = t.chars().count();
-    (char_cnt <= 3 && t.chars().all(|c| c.is_ascii_digit())) || char_cnt == 1
+    out
+}
+
+fn is_hallucination_token(s: &str) -> bool {
+    let core = strip_hallucination_punct(s);
+    if core.is_empty() {
+        return true;
+    }
+    let char_cnt = core.chars().count();
+    (char_cnt <= 3 && core.chars().all(|c| c.is_ascii_digit())) || char_cnt == 1
 }
 
 fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
@@ -402,8 +456,9 @@ fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
     cues.sort_by_key(|c| c.start_ms);
     let mut cleaned: Vec<SubtitleCue> = Vec::with_capacity(cues.len());
     for mut cur in cues.drain(..) {
-        let cur_text = cur.original.trim();
-        if cur_text.is_empty() {
+        let collapsed = collapse_char_stutter(cur.original.trim());
+        let cur_text = collapsed.trim();
+        if cur_text.is_empty() || strip_hallucination_punct(cur_text).is_empty() {
             continue;
         }
         cur.original = cur_text.to_string();
@@ -430,17 +485,18 @@ fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
         cleaned.push(cur);
     }
 
-    // Drop Whisper silence/music hallucination loops: >= 3 consecutive digit-only or 1-char cues
+    // Drop Whisper silence/music hallucination loops: >= 3 consecutive digit-only or 1-char cues (ignoring punctuation)
     let mut filtered: Vec<SubtitleCue> = Vec::with_capacity(cleaned.len());
     let mut i = 0;
     while i < cleaned.len() {
         if is_hallucination_token(&cleaned[i].original) {
+            let core_i = strip_hallucination_punct(&cleaned[i].original);
+            let i_digits = !core_i.is_empty() && core_i.chars().all(|c| c.is_ascii_digit());
             let mut j = i + 1;
             while j < cleaned.len() && is_hallucination_token(&cleaned[j].original) {
-                let same_text = cleaned[j].original == cleaned[i].original;
-                let both_digits = cleaned[i].original.chars().all(|c| c.is_ascii_digit())
-                    && cleaned[j].original.chars().all(|c| c.is_ascii_digit());
-                if same_text || both_digits {
+                let core_j = strip_hallucination_punct(&cleaned[j].original);
+                let both_digits = i_digits && !core_j.is_empty() && core_j.chars().all(|c| c.is_ascii_digit());
+                if core_j == core_i || both_digits {
                     j += 1;
                 } else {
                     break;
@@ -464,6 +520,23 @@ fn contains_cjk_or_kana(s: &str) -> bool {
             0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
         )
     })
+}
+
+fn batch_looks_chinese(items: &[IndexedSubtitleLine]) -> bool {
+    let mut has_han = false;
+    let mut has_kana = false;
+    for item in items {
+        let body = strip_speaker_hint_prefix(&item.t);
+        for c in body.chars() {
+            let code = c as u32;
+            if matches!(code, 0x4E00..=0x9FFF | 0x3400..=0x4DBF) {
+                has_han = true;
+            } else if matches!(code, 0x3040..=0x30FF) {
+                has_kana = true;
+            }
+        }
+    }
+    has_han && !has_kana
 }
 
 fn estimate_max_cue_sec(text: &str) -> f64 {
@@ -500,31 +573,6 @@ fn needs_translation_retry(original: &str, translated: &str, target_lang: &str) 
     false
 }
 
-async fn translate_indexed_subset(
-    cfg: &AppConfig,
-    items: &[IndexedSubtitleLine],
-    prev_context: &str,
-    title: Option<&str>,
-    strict_retry: bool,
-    memory: Option<&mut TranslationMemory>,
-) -> Result<Vec<(usize, String)>, String> {
-    let title_ctx = title
-        .filter(|t| !t.is_empty())
-        .map(|t| format!(" for the video titled \"{}\"", t))
-        .unwrap_or_default();
-    let retry_note = if strict_retry {
-        format!(
-            " CRITICAL: Translate EVERY single line into {} — do NOT copy or leave source-language text.",
-            cfg.target_lang
-        )
-    } else {
-        String::new()
-    };
-    let output_rule = if memory.is_some() {
-        "4. Return ONLY a JSON object: {\"lines\":[{\"i\":0,\"t\":\"...\"},...],\"glossary\":{\"source_term\":\"translated_name\"},\"scene\":\"1-sentence current scene & pronouns\"}. In \"glossary\", ONLY include NEW character names, proper nouns, or ASR homophone aliases discovered in this batch (leave {} if none). Keep \"lines\" with exact same \"i\" indices; do NOT merge, split, or skip lines."
-    } else {
-        "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
-    };
 fn strip_speaker_hint_prefix(s: &str) -> String {
     let t = s.trim();
     if let Some(rest) = t.strip_prefix('[') {
@@ -538,17 +586,60 @@ fn strip_speaker_hint_prefix(s: &str) -> String {
     t.to_string()
 }
 
-    let prompt = format!(
-        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal/Hán-Việt phrasing or word-by-word translation). Prefer concise phrasing that fits natural dubbing cadence when possible without losing meaning or emotional nuance. Add natural punctuation ('?' for questions, '!' for exclamations/commands/calls, ',' for pauses) so TTS intonation sounds expressive, but do NOT force a trailing '.' on short incomplete fragments.\n2. Keep character names, relationships, and pronouns strictly consistent with the Global Glossary and scene context (e.g., couples use Anh–Em, friends/rivals stay consistent — never randomly switch to Tôi–Cậu). If a line starts with an audio speaker hint like \"[Nữ · A]\" or \"[Nam · B]\", use it to infer speaker gender and pronouns (prefer story context if they conflict), and NEVER include the \"[...]\" tag in your translated output.\n3. The source comes from speech recognition (ASR) and may contain homophone typos (e.g. 陈默 misheard as 沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"). Keep its literal meaning when it is a normal verb/adjective/state (e.g. \"他沉默了\" = \"Anh ấy im lặng\").\n{}{}{}\n\n{}",
+fn build_translation_prompt(
+    cfg: &AppConfig,
+    items: &[IndexedSubtitleLine],
+    prev_context: &str,
+    title: Option<&str>,
+    strict_retry: bool,
+    with_memory: bool,
+) -> String {
+    let title_ctx = title
+        .filter(|t| !t.is_empty())
+        .map(|t| format!(" for the video titled \"{}\"", t))
+        .unwrap_or_default();
+    let retry_note = if strict_retry {
+        format!(
+            " CRITICAL: Translate EVERY single line into {} — do NOT copy or leave source-language text.",
+            cfg.target_lang
+        )
+    } else {
+        String::new()
+    };
+    let output_rule = if with_memory {
+        "4. Return ONLY a JSON object: {\"lines\":[{\"i\":0,\"t\":\"...\"},...],\"glossary\":{\"source_term\":\"translated_name\"},\"scene\":\"1-sentence current scene, active speakers & their relationship/pronouns\"}. In \"glossary\", ONLY include NEW character names, proper nouns, or ASR homophone aliases discovered in this batch (leave {} if none). Keep \"lines\" with exact same \"i\" indices; do NOT merge, split, or skip lines."
+    } else {
+        "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
+    };
+    let asr_rule = if batch_looks_chinese(items) {
+        "3. The source comes from speech recognition (ASR) and may contain Chinese homophone/tone errors: watch closely for kinship or politeness confusions (e.g., \"没事吧\" misheard for \"没事爸\" when speaking to a father/elder, polite \"您\" misheard as \"你\" with elders/staff/clients) and homophone character names (e.g. 陈默↔沉默, 风唇→丰唇, 不生字→不识字). ONLY convert a homophone into a character name from the Global Glossary when it acts as a person's name/vocative/subject (standing alone, called at start/end of line like \"沉默，过来\", or before a person-only verb like \"沉默张嘴\"); keep its literal meaning when used as a normal verb/adjective/state (e.g. \"他沉默了\")."
+    } else {
+        "3. The source comes from speech recognition (ASR) and may contain phonetic or homophone transcription errors. Use scene context and the Global Glossary to resolve misheard words or proper names naturally, only treating a homophone as a character's name when grammatically used as a name, vocative, or subject."
+    };
+
+    format!(
+        "Translate these {} subtitle lines into natural, idiomatic {} for spoken movie/drama dialogue{}.\nRules:\n1. Use natural everyday spoken {} (avoid stiff literal or word-by-word translation). Prefer concise phrasing that fits natural dubbing cadence when possible without losing meaning or emotional nuance. Add natural punctuation ('?' for questions, '!' for exclamations/commands/calls, ',' for pauses) so TTS intonation sounds expressive, but do NOT force a trailing '.' on short incomplete fragments.\n2. Keep character names, relationships, and pronouns strictly consistent within each scene (never randomly switch romantic/peer pronouns mid-conversation), BUT immediately adapt address terms and pronouns when the scene shifts to parents/children, elders, bosses/subordinates, staff, or doctors/patients. Audio speaker hints like \"[Nữ · A]\" or \"[Nam · B]\" group voices by acoustic timbre only — two different characters of the same gender (such as a male lead and a father, elder, or boss) may share the same speaker tag! Always prioritize story/scene context (kinship, family/corporate setting, respectful cues) over a shared speaker tag when choosing pronouns, and NEVER include \"[...]\" tags in your translated output.\n{}\n{}{}{}\n\n{}",
         items.len(),
         cfg.target_lang,
         title_ctx,
         cfg.target_lang,
+        asr_rule,
         output_rule,
         prev_context,
         retry_note,
         serde_json::to_string(items).unwrap_or_default()
-    );
+    )
+}
+
+async fn translate_indexed_subset(
+    cfg: &AppConfig,
+    items: &[IndexedSubtitleLine],
+    prev_context: &str,
+    title: Option<&str>,
+    strict_retry: bool,
+    memory: Option<&mut TranslationMemory>,
+) -> Result<Vec<(usize, String)>, String> {
+    let prompt = build_translation_prompt(cfg, items, prev_context, title, strict_retry, memory.is_some());
     let reply = call_llm(cfg, &prompt).await?;
     let trimmed = reply.trim();
     if let (Some(obj_start), Some(obj_end)) = (trimmed.find('{'), trimmed.rfind('}')) {
@@ -599,6 +690,20 @@ fn strip_speaker_hint_prefix(s: &str) -> String {
     Ok(Vec::new())
 }
 
+fn speaker_code_to_hint(code: &str) -> String {
+    if let Some((prefix, label)) = code.split_once(':') {
+        match prefix {
+            "F" => format!("[Nữ · {label}]"),
+            "M" => format!("[Nam · {label}]"),
+            _ => format!("[Speaker {label}]"),
+        }
+    } else if !code.trim().is_empty() {
+        format!("[Speaker {}]", code.trim())
+    } else {
+        String::new()
+    }
+}
+
 async fn translate_batch_exact(
     cfg: &AppConfig,
     batch: &mut [SubtitleCue],
@@ -611,7 +716,14 @@ async fn translate_batch_exact(
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            let hint = speaker_hints.and_then(|h| h.get(i)).map(|s| s.as_str()).unwrap_or("");
+            let fallback_hint;
+            let hint = match speaker_hints.and_then(|h| h.get(i)).map(|s| s.as_str()) {
+                Some(h) if !h.is_empty() => h,
+                _ => {
+                    fallback_hint = c.speaker.as_deref().map(speaker_code_to_hint).unwrap_or_default();
+                    fallback_hint.as_str()
+                }
+            };
             let text = if hint.is_empty() {
                 c.original.clone()
             } else {
@@ -666,18 +778,20 @@ async fn translate_cue_batches(
     translated_all: &mut Vec<SubtitleCue>,
     data_dir: &Path,
     video_id: &str,
+    title: &str,
     latest_cfg: &AppConfig,
+    memory: &mut TranslationMemory,
     speaker_hints: Option<&[String]>,
 ) -> Result<(), String> {
-    let mut memory = TranslationMemory::default();
+    let title_opt = (!title.trim().is_empty()).then_some(title);
     for (b_idx, batch) in cues.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
-        let prev_context = build_prev_context(translated_all, &memory);
+        let prev_context = build_prev_context(translated_all, memory);
         let hint_slice = speaker_hints.map(|all| {
             let start = b_idx * TRANSLATE_BATCH_SIZE;
             let end = (start + batch.len()).min(all.len());
             &all[start.min(all.len())..end]
         });
-        translate_batch_exact(latest_cfg, batch, &prev_context, None, &mut memory, hint_slice).await?;
+        translate_batch_exact(latest_cfg, batch, &prev_context, title_opt, memory, hint_slice).await?;
         for cue in batch.iter_mut() {
             if cue.translated.is_empty() {
                 cue.translated = cue.original.clone();
@@ -686,10 +800,16 @@ async fn translate_cue_batches(
         }
         let partial_bundle = SubtitleBundle {
             video_id: video_id.to_string(),
-            title: video_id.to_string(),
+            title: if title.trim().is_empty() {
+                video_id.to_string()
+            } else {
+                title.to_string()
+            },
             target_lang: latest_cfg.target_lang.clone(),
             source: "whisper".to_string(),
             partial: true,
+            glossary: memory.to_glossary_map(),
+            scene_note: memory.scene_note.clone(),
             cues: translated_all.clone(),
         };
         save_cached_subtitles(data_dir, &partial_bundle);
@@ -948,8 +1068,9 @@ async fn extract_raw_cues<F>(
     config: &AppConfig,
     url: &str,
     video_id: &str,
+    title: &str,
     on_progress: &F,
-) -> Result<(String, Vec<SubtitleCue>), String>
+) -> Result<(String, Vec<SubtitleCue>, TranslationMemory), String>
 where
     F: Fn(u8, String),
 {
@@ -1007,7 +1128,7 @@ where
             let cues = parse_vtt_or_srt(&raw);
             let _ = fs::remove_dir_all(&tmp_dir);
             if !cues.is_empty() {
-                return Ok(("youtube-cc".to_string(), cues));
+                return Ok(("youtube-cc".to_string(), cues, TranslationMemory::default()));
             }
         }
     }
@@ -1218,8 +1339,13 @@ where
         .as_ref()
         .map(|r| r.cues.clone())
         .unwrap_or_default();
-    let mut translated_all: Vec<SubtitleCue> = load_cached_subtitles(data_dir, video_id, &config.target_lang)
-        .filter(|b| b.partial)
+    let existing_partial = load_cached_subtitles(data_dir, video_id, &config.target_lang)
+        .filter(|b| b.partial);
+    let mut memory = existing_partial
+        .as_ref()
+        .map(TranslationMemory::from_bundle)
+        .unwrap_or_default();
+    let mut translated_all: Vec<SubtitleCue> = existing_partial
         .map(|b| b.cues)
         .unwrap_or_default();
 
@@ -1232,7 +1358,9 @@ where
             &mut translated_all,
             data_dir,
             video_id,
+            title,
             &latest_cfg,
+            &mut memory,
             None,
         )
         .await?;
@@ -1474,7 +1602,9 @@ where
             &mut translated_all,
             data_dir,
             video_id,
+            title,
             &latest_cfg,
+            &mut memory,
             speaker_hints.as_deref(),
         )
         .await?;
@@ -1484,7 +1614,7 @@ where
     if raw_all.is_empty() {
         return Err("Whisper produced empty subtitles".to_string());
     }
-    Ok(("whisper".to_string(), translated_all))
+    Ok(("whisper".to_string(), translated_all, memory))
 }
 
 async fn call_llm(config: &AppConfig, prompt: &str) -> Result<String, String> {
@@ -1762,18 +1892,18 @@ where
     bak_os.push(".bak");
     let bak_path = PathBuf::from(bak_os);
 
-    let (source, mut cues) = match load_raw_cache(data_dir, video_id) {
+    let (source, mut cues, mut extracted_memory) = match load_raw_cache(data_dir, video_id) {
         Some(raw) if !raw.partial => {
             on_progress(50, "Loaded cached transcription, resuming translation...".to_string());
-            (raw.source, raw.cues)
+            (raw.source, raw.cues, TranslationMemory::default())
         }
         _ => {
             on_progress(5, "Checking YouTube captions...".to_string());
-            match extract_raw_cues(data_dir, bin_dir, config, url, video_id, &on_progress).await {
-                Ok((src, extracted)) => {
+            match extract_raw_cues(data_dir, bin_dir, config, url, video_id, title, &on_progress).await {
+                Ok((src, extracted, mem)) => {
                     let _ = fs::remove_file(&bak_path);
                     save_raw_cache(data_dir, video_id, &src, &extracted, false, 0, 0);
-                    (src, extracted)
+                    (src, extracted, mem)
                 }
                 Err(err) => {
                     if !target_cache.is_file() && bak_path.is_file() {
@@ -1796,6 +1926,8 @@ where
             target_lang: latest_cfg.target_lang.clone(),
             source,
             partial: false,
+            glossary: extracted_memory.to_glossary_map(),
+            scene_note: extracted_memory.scene_note.clone(),
             cues,
         };
         save_cached_subtitles(data_dir, &bundle);
@@ -1803,8 +1935,12 @@ where
         return Ok(bundle);
     }
 
-    let mut translated_all: Vec<SubtitleCue> = load_cached_subtitles(data_dir, video_id, &latest_cfg.target_lang)
-        .filter(|b| b.partial && b.cues.len() < cues.len())
+    let existing_partial = load_cached_subtitles(data_dir, video_id, &latest_cfg.target_lang)
+        .filter(|b| b.partial && b.cues.len() < cues.len());
+    if let Some(ref b) = existing_partial {
+        extracted_memory = TranslationMemory::from_bundle(b);
+    }
+    let mut translated_all: Vec<SubtitleCue> = existing_partial
         .map(|b| b.cues)
         .unwrap_or_default();
 
@@ -1812,7 +1948,7 @@ where
     let total_cues = cues.len().max(1);
     let remaining = &mut cues[resume_from..];
     let total_batches = remaining.len().div_ceil(TRANSLATE_BATCH_SIZE).max(1);
-    let mut memory = TranslationMemory::default();
+    let mut memory = extracted_memory;
 
     for (b_idx, chunk) in remaining.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
         let done_cues = resume_from + b_idx * TRANSLATE_BATCH_SIZE;
@@ -1838,6 +1974,8 @@ where
             target_lang: latest_cfg.target_lang.clone(),
             source: source.clone(),
             partial: !is_last,
+            glossary: memory.to_glossary_map(),
+            scene_note: memory.scene_note.clone(),
             cues: translated_all.clone(),
         };
         save_cached_subtitles(data_dir, &partial_bundle);
@@ -1849,6 +1987,8 @@ where
         target_lang: latest_cfg.target_lang.clone(),
         source,
         partial: false,
+        glossary: memory.to_glossary_map(),
+        scene_note: memory.scene_note,
         cues: translated_all,
     };
     save_cached_subtitles(data_dir, &bundle);
@@ -1918,7 +2058,7 @@ pub fn prepare_retranslate_from_cache(
     let path = data_dir.join("subtitles").join(file_name);
     let raw = fs::read_to_string(&path).map_err(|e| format!("Subtitle cache not found: {e}"))?;
     let bundle: SubtitleBundle = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let raw_cues: Vec<SubtitleCue> = bundle
+    let mut raw_cues: Vec<SubtitleCue> = bundle
         .cues
         .iter()
         .map(|c| SubtitleCue {
@@ -1929,6 +2069,9 @@ pub fn prepare_retranslate_from_cache(
             speaker: c.speaker.clone(),
         })
         .collect();
+    if bundle.source == "whisper" {
+        cleanup_whisper_cues(&mut raw_cues);
+    }
     if !raw_cues.is_empty() {
         save_raw_cache(data_dir, &bundle.video_id, &bundle.source, &raw_cues, false, 0, 0);
     }
@@ -2001,8 +2144,93 @@ fn format_srt_time(ms: u64) -> String {
     format!("{h:02}:{m:02}:{s:02},{rem_ms:03}")
 }
 
+pub fn iso639_2_lang_code(target_lang: &str) -> &'static str {
+    match target_lang.trim().to_ascii_lowercase().as_str() {
+        "vietnamese" | "vi" | "vie" | "tiếng việt" | "tieng viet" => "vie",
+        "english" | "en" | "eng" => "eng",
+        "chinese" | "simplified chinese" | "traditional chinese" | "zh" | "zho" | "chi" => "zho",
+        "japanese" | "ja" | "jpn" => "jpn",
+        "korean" | "ko" | "kor" => "kor",
+        "french" | "fr" | "fra" | "fre" => "fra",
+        "spanish" | "es" | "spa" => "spa",
+        "german" | "de" | "deu" | "ger" => "deu",
+        "thai" | "th" | "tha" => "tha",
+        "indonesian" | "id" | "ind" => "ind",
+        "russian" | "ru" | "rus" => "rus",
+        "portuguese" | "pt" | "por" => "por",
+        _ => "und",
+    }
+}
+
+pub fn normalize_cues_for_mov_text(cues: &[SubtitleCue]) -> Vec<SubtitleCue> {
+    const NEAR_SIMULTANEOUS_MS: u64 = 60;
+    const MIN_CUE_DURATION_MS: u64 = 580;
+    const MICRO_GAP_CLOSE_MS: u64 = 120;
+
+    let mut sorted: Vec<SubtitleCue> = cues
+        .iter()
+        .filter(|c| !c.translated.trim().is_empty() || !c.original.trim().is_empty())
+        .cloned()
+        .collect();
+    if sorted.is_empty() {
+        return sorted;
+    }
+    sorted.sort_by_key(|c| c.start_ms);
+
+    let mut merged: Vec<SubtitleCue> = Vec::with_capacity(sorted.len());
+    for mut cur in sorted {
+        cur.translated = if cur.translated.trim().is_empty() {
+            cur.original.trim().to_string()
+        } else {
+            cur.translated.trim().to_string()
+        };
+        if let Some(prev) = merged.last_mut() {
+            if cur.start_ms < prev.start_ms.saturating_add(NEAR_SIMULTANEOUS_MS) {
+                if cur.translated != prev.translated && !cur.translated.is_empty() {
+                    prev.translated = format!("{}\n{}", prev.translated, cur.translated);
+                }
+                prev.end_ms = prev.end_ms.max(cur.end_ms);
+                continue;
+            }
+        }
+        merged.push(cur);
+    }
+
+    let len = merged.len();
+    for i in 0..len {
+        let start = merged[i].start_ms;
+        let raw_end = if merged[i].end_ms <= start {
+            start.saturating_add(MIN_CUE_DURATION_MS)
+        } else {
+            merged[i].end_ms
+        };
+        let mut end = raw_end.max(start.saturating_add(MIN_CUE_DURATION_MS));
+        if i + 1 < len {
+            let next_start = merged[i + 1].start_ms;
+            end = end.min(next_start);
+            let gap = next_start.saturating_sub(end);
+            if gap > 0 && gap <= MICRO_GAP_CLOSE_MS {
+                end = next_start;
+            }
+        }
+        merged[i].end_ms = end;
+    }
+
+    merged
+}
+
 pub fn write_srt_file(bundle: &SubtitleBundle, dest: &Path) -> Result<(), String> {
-    write_srt_file_with_mode(bundle, dest, "translated")
+    let normalized = SubtitleBundle {
+        video_id: bundle.video_id.clone(),
+        title: bundle.title.clone(),
+        target_lang: bundle.target_lang.clone(),
+        source: bundle.source.clone(),
+        partial: bundle.partial,
+        glossary: BTreeMap::new(),
+        scene_note: String::new(),
+        cues: normalize_cues_for_mov_text(&bundle.cues),
+    };
+    write_srt_file_with_mode(&normalized, dest, "translated")
 }
 
 pub fn write_srt_file_with_mode(
@@ -2139,11 +2367,122 @@ mod tests {
             mk_cue(4100, 4500, "一"),
             mk_cue(4600, 5000, "一"),
             mk_cue(5100, 5500, "一"),
-            mk_cue(6000, 7000, "嗯"),
-            mk_cue(7500, 8500, "我回来了"),
+            mk_cue(5600, 6000, "嗯?"),
+            mk_cue(6100, 6500, "嗯？"),
+            mk_cue(6600, 7000, "嗯?"),
+            mk_cue(7100, 7500, "啊啊啊啊啊啊快十八号了"),
+            mk_cue(8000, 8500, "嗯"),
+            mk_cue(9000, 9800, "我回来了"),
         ];
         cleanup_whisper_cues(&mut cues);
         let texts: Vec<&str> = cues.iter().map(|c| c.original.as_str()).collect();
-        assert_eq!(texts, vec!["陈默,快来。", "嗯", "我回来了"]);
+        assert_eq!(texts, vec!["陈默,快来。", "啊快十八号了", "嗯", "我回来了"]);
+    }
+
+    #[test]
+    fn test_translation_memory_bundle_roundtrip_and_speaker_hint() {
+        let mut mem = TranslationMemory::default();
+        let mut g = BTreeMap::new();
+        g.insert("陈默".to_string(), "Trần Mặc".to_string());
+        g.insert("苏红袖".to_string(), "Tô Hồng Tú".to_string());
+        mem.merge(g, Some("Bàn việc ở viện dưỡng lão".to_string()));
+
+        let bundle = SubtitleBundle {
+            video_id: "vid1".to_string(),
+            title: "Title".to_string(),
+            target_lang: "Vietnamese".to_string(),
+            source: "whisper".to_string(),
+            partial: true,
+            glossary: mem.to_glossary_map(),
+            scene_note: mem.scene_note.clone(),
+            cues: vec![],
+        };
+        let raw_json = serde_json::to_string(&bundle).unwrap();
+        let decoded: SubtitleBundle = serde_json::from_str(&raw_json).unwrap();
+        let restored = TranslationMemory::from_bundle(&decoded);
+        assert_eq!(restored.glossary.len(), 2);
+        assert_eq!(restored.scene_note, "Bàn việc ở viện dưỡng lão");
+        assert_eq!(speaker_code_to_hint("M:A"), "[Nam · A]");
+        assert_eq!(speaker_code_to_hint("F:B"), "[Nữ · B]");
+        assert_eq!(speaker_code_to_hint("U:C"), "[Speaker C]");
+    }
+
+    #[test]
+    fn test_two_layer_prompt_language_isolation() {
+        let cfg = AppConfig::default();
+        let en_items = vec![
+            IndexedSubtitleLine { i: 0, t: "[Nam · A] What should we do now, Dad?".to_string() },
+            IndexedSubtitleLine { i: 1, t: "[Nam · B] Hold steady and review the contracts.".to_string() },
+        ];
+        let en_prompt = build_translation_prompt(&cfg, &en_items, "", Some("The Firm"), false, true);
+        assert!(en_prompt.contains("two different characters of the same gender"));
+        assert!(!en_prompt.contains("没事爸"));
+
+        let ja_items = vec![
+            IndexedSubtitleLine { i: 0, t: "[Nữ · B] お父さん、大丈夫だよ".to_string() },
+        ];
+        let ja_prompt = build_translation_prompt(&cfg, &ja_items, "", None, false, true);
+        assert!(!ja_prompt.contains("没事爸"));
+
+        let zh_items = vec![
+            IndexedSubtitleLine { i: 0, t: "[Nữ · B] 没事吧".to_string() },
+            IndexedSubtitleLine { i: 1, t: "[Nữ · B] 我都安排着".to_string() },
+        ];
+        let zh_prompt = build_translation_prompt(&cfg, &zh_items, "", None, false, true);
+        assert!(zh_prompt.contains("没事爸"));
+        assert!(zh_prompt.contains("two different characters of the same gender"));
+    }
+
+    #[test]
+    fn test_normalize_cues_for_mov_text_invariants() {
+        let mk_tr = |s: u64, e: u64, tr: &str| SubtitleCue {
+            start_ms: s,
+            end_ms: e,
+            original: tr.to_string(),
+            translated: tr.to_string(),
+            speaker: None,
+        };
+        let raw = vec![
+            // Short 280ms cue with plenty of silence after -> extended to 580ms, start unchanged
+            mk_tr(3500, 3780, "Tôi tên là Trần Mặc"),
+            // Overlapping pair (like rmKI_YSh_bw cue 23 & 24: 59480..59730 vs 59640..60800)
+            mk_tr(59480, 59730, "Này"),
+            mk_tr(59640, 60800, "Cô không sao chứ"),
+            // Micro-gap of 80ms -> closed to next.start_ms to avoid 2-byte empty tx3g clear packet
+            mk_tr(62000, 62800, "Đáng yêu lắm"),
+            mk_tr(62880, 64000, "Đúng không?"),
+            // Near-simultaneous cues (<60ms apart) -> merged instead of 0-duration packet
+            mk_tr(70000, 70500, "Trần Mặc!"),
+            mk_tr(70020, 71000, "Mau lại đây!"),
+        ];
+
+        let norm = normalize_cues_for_mov_text(&raw);
+        assert_eq!(norm.len(), 6);
+        // 1. Short cue extended to 580ms, start_ms preserved
+        assert_eq!((norm[0].start_ms, norm[0].end_ms), (3500, 4080));
+        // 2. Overlap clamped cleanly at next.start_ms (59640), start_ms preserved
+        assert_eq!((norm[1].start_ms, norm[1].end_ms), (59480, 59640));
+        assert_eq!((norm[2].start_ms, norm[2].end_ms), (59640, 60800));
+        // 3. 80ms micro-gap closed seamlessly
+        assert_eq!((norm[3].start_ms, norm[3].end_ms), (62000, 62880));
+        assert_eq!((norm[4].start_ms, norm[4].end_ms), (62880, 64000));
+        // 4. Simultaneous start merged cleanly
+        assert_eq!((norm[5].start_ms, norm[5].end_ms), (70000, 71000));
+        assert_eq!(norm[5].translated, "Trần Mặc!\nMau lại đây!");
+
+        // Global invariants: strictly positive durations, zero overlaps, zero micro-gaps <= 120ms
+        for i in 0..norm.len() {
+            assert!(norm[i].end_ms > norm[i].start_ms);
+            if i + 1 < norm.len() {
+                assert!(norm[i].end_ms <= norm[i + 1].start_ms);
+                let gap = norm[i + 1].start_ms - norm[i].end_ms;
+                assert!(gap == 0 || gap > 120);
+            }
+        }
+
+        assert_eq!(iso639_2_lang_code("Vietnamese"), "vie");
+        assert_eq!(iso639_2_lang_code("English"), "eng");
+        assert_eq!(iso639_2_lang_code("Japanese"), "jpn");
+        assert_eq!(iso639_2_lang_code("UnknownLang"), "und");
     }
 }

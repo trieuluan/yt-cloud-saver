@@ -1,6 +1,6 @@
 use crate::config::{load_config, AppConfig};
 use crate::tools::{build_env_path, find_binary, scan_remote_videos, verify_remote_ready, CloudFileInfo};
-use crate::translate::{translate_video_subtitles, write_srt_file};
+use crate::translate::{iso639_2_lang_code, translate_video_subtitles, write_srt_file};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -773,6 +773,9 @@ impl JobManager {
                     );
                     if write_srt_file(&bundle, &srt_path).is_ok() {
                         if let Some(ffmpeg) = find_binary("ffmpeg", &self.bin_dir) {
+                            let lang_code = iso639_2_lang_code(&bundle.target_lang);
+                            let lang_meta = format!("language={lang_code}");
+                            let title_meta = format!("title={}", bundle.target_lang.trim());
                             let status = Command::new(ffmpeg)
                                 .args([
                                     "-y",
@@ -780,10 +783,24 @@ impl JobManager {
                                     &file_path.to_string_lossy(),
                                     "-i",
                                     &srt_path.to_string_lossy(),
+                                    "-map",
+                                    "0:v:0",
+                                    "-map",
+                                    "0:a?",
+                                    "-map",
+                                    "1:s:0",
                                     "-c",
                                     "copy",
                                     "-c:s",
                                     "mov_text",
+                                    "-metadata:s:s:0",
+                                    &lang_meta,
+                                    "-metadata:s:s:0",
+                                    &title_meta,
+                                    "-disposition:s:0",
+                                    "default",
+                                    "-movflags",
+                                    "+faststart",
                                     &subbed_path.to_string_lossy(),
                                 ])
                                 .status()

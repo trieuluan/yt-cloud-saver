@@ -2,6 +2,14 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.45] - 2026-11-27
+
+### Fixed & Improved
+- **Google Drive Web `mov_text` Subtitle Smoothness (`translate.rs` / `jobs.rs`):** Normalized embedded MP4 subtitle cues (`normalize_cues_for_mov_text`) to eliminate overlapping timestamps, merge near-simultaneous `< 60ms` starts, extend ultra-short cues into silent pauses (`>= 580ms`) without shifting `start_ms`, and close `<= 120ms` micro-gaps that generated 2-byte empty `tx3g` clear packets. Added explicit stream mapping (`-map 0:v:0 -map 0:a? -map 1:s:0`), ISO 639-2 language metadata (`language=vie`/`eng`/`jpn`...), `default` disposition, and `-movflags +faststart`.
+- **Cross-Chunk `TranslationMemory` & Re-translate Speaker Hints (`translate.rs`):** Shared `TranslationMemory` (`glossary` + `scene_note`, expanded up to 80 terms) and video `title` across all Whisper chunks, persisted them in partial `SubtitleBundle` caches for seamless resume, and reconstructed `[Nam · A]` / `[Nữ · B]` hints from `cue.speaker` during Re-translate and resume.
+- **Two-Layer Context-Aware Pronoun & ASR Prompt (`translate.rs`):** Added universal language-agnostic scene-shift pronoun adaptation when acoustic speaker tags are shared across same-gender characters of different generations/roles (e.g. male lead vs father/elder/boss), while isolating Chinese ASR homophone rules (`没事吧` ↔ `没事爸`, `你` ↔ `您`) strictly to Chinese source batches.
+- **Stronger Whisper Hallucination & Stutter Cleanup (`translate.rs`):** Stripped punctuation when detecting 1-character repetition loops (catching `嗯?` / `啊！` runs), collapsed 4+ character stutters (`啊啊啊啊啊啊...`), and applied cleanup during **Re-translate** on older cached subtitle bundles.
+
 ## [1.2.44] - 2026-11-27
 
 ### Fixed & Improved
