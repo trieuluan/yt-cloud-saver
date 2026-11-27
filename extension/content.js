@@ -851,8 +851,12 @@
     const maxKeep = Math.min(subBundle.cues.length - 1, currentIdx + 25);
     const keepKeys = new Set();
     for (let i = minKeep; i <= maxKeep; i += 1) {
-      const t = subBundle.cues[i]?.translated?.trim();
-      if (t) keepKeys.add(`${voice}|${rateStr}|${t}`);
+      const cue = subBundle.cues[i];
+      const t = cue?.translated?.trim();
+      if (t) {
+        const cueVoice = resolveCueVoice(cue) || voice;
+        keepKeys.add(`${cueVoice}|${rateStr}|${t}`);
+      }
     }
     for (const key of ttsAudioCache.keys()) {
       if (!keepKeys.has(key)) {
@@ -866,22 +870,30 @@
   let prepareBatchInFlight = false;
   async function prepareBatchAhead(startIdx, count = 24) {
     const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
-    if (voice === 'browser' || subStyle.multiVoice || !subBundle?.cues?.length) return;
+    if (voice === 'browser' || !subBundle?.cues?.length) return;
     if (prepareBatchInFlight) return;
     if (preparedFromIdx >= 0 && startIdx >= preparedFromIdx && startIdx + 6 < preparedUpToIdx) return;
 
     const from = Math.max(0, startIdx);
     const to = Math.min(subBundle.cues.length, from + count);
-    const texts = [];
+    const byVoice = new Map();
     for (let i = from; i < to; i += 1) {
-      const t = subBundle.cues[i]?.translated?.trim();
-      if (hasSpeakableText(t)) texts.push(t);
+      const cue = subBundle.cues[i];
+      const t = cue?.translated?.trim();
+      if (!hasSpeakableText(t)) continue;
+      const cueVoice = resolveCueVoice(cue) || voice;
+      if (!byVoice.has(cueVoice)) byVoice.set(cueVoice, []);
+      byVoice.get(cueVoice).push(t);
     }
-    if (!texts.length) return;
+    if (!byVoice.size) return;
 
     prepareBatchInFlight = true;
     try {
-      await sendBg('PREPARE_TTS', { texts, voice, rate: '+15%' }).catch(() => {});
+      await Promise.all(
+        [...byVoice.entries()].map(([v, texts]) =>
+          sendBg('PREPARE_TTS', { texts, voice: v, rate: '+15%' }).catch(() => {}),
+        ),
+      );
       preparedFromIdx = preparedFromIdx >= 0 && startIdx >= preparedFromIdx ? preparedFromIdx : from;
       preparedUpToIdx = Math.max(preparedUpToIdx, to);
     } finally {

@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.43] - 2026-11-27
+
+### Fixed
+- **Multi-Voice Smoothness & Caching (`extension/content.js`):** Fixed `pruneRamCacheWindow` accidentally evicting prefetched audio for secondary/opposite-gender voices on the next cue, and enabled `prepareBatchAhead` (24-cue lookahead) when `multiVoice` is active by grouping upcoming cues per resolved voice.
+
 ## [1.2.42] - 2026-11-27
 
 ### Added & Improved
