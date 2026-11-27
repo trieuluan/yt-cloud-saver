@@ -19,21 +19,55 @@
 
 ---
 
-## Demo
+## Demo & Walkthrough
 
 <p align="center">
-  <img src="docs/demo.gif" alt="YT Cloud Saver Demo" width="92%">
+  <img src="docs/demo.gif" alt="YT Cloud Saver Interactive Walkthrough" width="94%">
 </p>
 
-### YouTube Player + Extension Popup (Auto Multi-Voice &amp; VieNeu-TTS)
 <p align="center">
-  <img src="docs/preview-youtube.png" alt="YT Cloud Saver on YouTube" width="92%">
+  <a href="docs/demo.mp4"><b>▶ Watch Full Walkthrough Video with Vietnamese Voiceover (<code>docs/demo.mp4</code> · 921 KB)</b></a>
 </p>
 
-### Desktop App (`AI & Translate` · Whisper · YAMNet · WeSpeaker · VieNeu-TTS)
+### 1. YouTube Player (`AI CC` · `Dub` · `Saved ✓ ▾` Cloud Menu)
 <p align="center">
-  <img src="docs/preview-desktop.png" alt="YT Cloud Saver Desktop App" width="92%">
+  <img src="docs/preview-youtube.png" alt="YT Cloud Saver on YouTube with Bilingual Subtitles & Cloud Menu" width="92%">
 </p>
+
+### 2. Extension Popup (`VieNeu-TTS` · `Auto Multi-Voice` · `Dub Voice Boost 200%`)
+<p align="center">
+  <img src="docs/preview-popup.png" alt="YT Cloud Saver Extension Popup with Auto Multi-Voice" width="92%">
+</p>
+
+### 3. Desktop App — `AI & Translate` (`Gemini Thinking: 0` · `YAMNet` · `WeSpeaker` · `VieNeu-TTS`)
+<p align="center">
+  <img src="docs/preview-desktop-ai.png" alt="YT Cloud Saver AI & Translate Settings" width="92%">
+</p>
+
+### 4. Desktop App — `Activity` & Subtitle Library (Real macOS App)
+<p align="center">
+  <img src="docs/preview-desktop.png" alt="YT Cloud Saver Desktop App Activity" width="60%">
+</p>
+
+---
+
+## How the AI Pipeline Works
+
+```text
+YouTube Audio ─► YAMNet ONNX (Mute Music/Singing)
+                      │
+                      ▼
+             Whisper (Local VAD / Cloud Groq) + Hallucination Filter
+                      │
+                      ▼
+             WeSpeaker ONNX + F0 (2-Pass AHC Speaker & Gender Hints: M:A, F:B...)
+                      │
+                      ▼
+             LLM Translation (Gemini Thinking=0 / OpenAI / Ollama)
+                      │
+                      ▼
+             Auto Multi-Voice Dubbing (VieNeu-TTS Offline / Edge TTS + 200% Boost)
+```
 
 ---
 
