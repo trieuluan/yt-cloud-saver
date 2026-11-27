@@ -52,6 +52,8 @@ const aiBaseUrlInput = document.getElementById('aiBaseUrlInput');
 const aiApiKeyInput = document.getElementById('aiApiKeyInput');
 const aiModelInput = document.getElementById('aiModelInput');
 const aiModelSelect = document.getElementById('aiModelSelect');
+const geminiThinkingWrap = document.getElementById('geminiThinkingWrap');
+const geminiThinkingSelect = document.getElementById('geminiThinkingSelect');
 const fetchModelsBtn = document.getElementById('fetchModelsBtn');
 const testAiBtn = document.getElementById('testAiBtn');
 const aiTestMsg = document.getElementById('aiTestMsg');
@@ -387,6 +389,7 @@ function renderProviderFields(provider) {
   provBtns.forEach((b) => b.classList.toggle('active', b.dataset.prov === currentAiProvider));
   aiBaseUrlWrap.classList.toggle('hidden', currentAiProvider === 'gemini');
   aiApiKeyWrap.classList.toggle('hidden', currentAiProvider === 'ollama');
+  geminiThinkingWrap?.classList.toggle('hidden', currentAiProvider !== 'gemini');
   aiBaseUrlInput.value = prof.baseUrl || '';
   aiApiKeyInput.value = prof.apiKey || '';
   aiModelInput.value = prof.model || '';
@@ -578,6 +581,7 @@ async function persistSettings() {
         aiApiKey: active.apiKey,
         aiModel: active.model,
         aiProfiles,
+        geminiThinkingBudget: Number(geminiThinkingSelect?.value ?? 0),
         targetLang: targetLangSelect.value,
         useWhisperFallback: whisperFallbackInput.checked,
         whisperModel: whisperModelSelect.value,
@@ -659,6 +663,10 @@ async function loadState() {
         aiProfiles = { ...aiProfiles, ...data.config.aiProfiles };
       }
       renderProviderFields(data.config.aiProvider || 'gemini');
+      if (geminiThinkingSelect) {
+        const tb = data.config.geminiThinkingBudget ?? 0;
+        geminiThinkingSelect.value = String(tb);
+      }
       targetLangSelect.value = data.config.targetLang || 'Vietnamese';
       whisperFallbackInput.checked = Boolean(data.config.useWhisperFallback);
       whisperModelSelect.value = data.config.whisperModel || 'small';
@@ -716,7 +724,7 @@ provBtns.forEach((btn) => {
 });
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
-[targetLangSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, speakerDiarizeInput, embedSubtitlesInput].forEach((el) => el.addEventListener('change', () => {
+[targetLangSelect, geminiThinkingSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, speakerDiarizeInput, embedSubtitlesInput].filter(Boolean).forEach((el) => el.addEventListener('change', () => {
   renderYamnetSens(currentYamnetSens);
   persistSettings();
 }));

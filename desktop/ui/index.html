@@ -186,6 +186,14 @@
             <button id="testAiBtn" class="btn-secondary" type="button" style="align-self:flex-end">Test</button>
           </div>
           <select id="aiModelSelect" class="hidden"></select>
+          <div id="geminiThinkingWrap" class="quality-row" style="margin-top:8px; margin-bottom:0">
+            <span class="muted">Gemini Thinking</span>
+            <select id="geminiThinkingSelect">
+              <option value="0">Tắt (0 · Tiết kiệm nhất)</option>
+              <option value="1024">Nhẹ (1024 tokens · Cân bằng)</option>
+              <option value="-1">Mặc định của model</option>
+            </select>
+          </div>
           <p id="aiTestMsg" class="hint-text hidden"></p>
         </div>
 

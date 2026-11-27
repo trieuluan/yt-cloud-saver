@@ -304,7 +304,7 @@ fn parse_chunk_index(path: &Path) -> Option<usize> {
         .and_then(|s| s.parse::<usize>().ok())
 }
 
-const TRANSLATE_BATCH_SIZE: usize = 50;
+const TRANSLATE_BATCH_SIZE: usize = 80;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct IndexedSubtitleLine {
@@ -1509,22 +1509,46 @@ async fn call_llm_once(config: &AppConfig, prompt: &str) -> Result<String, Strin
         let endpoint = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={cfg_key}"
         );
-        let resp = client
+        let safety = json!([
+            { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE" },
+            { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
+            { "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE" },
+            { "category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE" }
+        ]);
+        let mut gen_cfg = json!({ "temperature": 0.3 });
+        if config.gemini_thinking_budget >= 0 {
+            gen_cfg["thinkingConfig"] = json!({ "thinkingBudget": config.gemini_thinking_budget });
+        }
+        let mut payload = json!({
+            "contents": [{ "parts": [{ "text": prompt }] }],
+            "generationConfig": gen_cfg,
+            "safetySettings": safety
+        });
+        let mut resp = client
             .post(&endpoint)
-            .json(&json!({
-                "contents": [{ "parts": [{ "text": prompt }] }],
-                "safetySettings": [
-                    { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE" },
-                    { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
-                    { "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE" },
-                    { "category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE" }
-                ]
-            }))
+            .json(&payload)
             .send()
             .await
             .map_err(|e| format!("Gemini request failed: {e}"))?;
-        let status = resp.status();
-        let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+        let mut status = resp.status();
+        let mut body: Value = resp.json().await.map_err(|e| e.to_string())?;
+        if status.as_u16() == 400
+            && body.to_string().to_ascii_lowercase().contains("thinking")
+        {
+            payload = json!({
+                "contents": [{ "parts": [{ "text": prompt }] }],
+                "generationConfig": { "temperature": 0.3 },
+                "safetySettings": safety
+            });
+            resp = client
+                .post(&endpoint)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| format!("Gemini request failed: {e}"))?;
+            status = resp.status();
+            body = resp.json().await.map_err(|e| e.to_string())?;
+        }
         if !status.is_success() {
             return Err(format!("Gemini HTTP {status}: {body}"));
         }

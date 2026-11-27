@@ -71,6 +71,8 @@ pub struct AppConfig {
     pub ai_model: String,
     #[serde(default = "default_ai_profiles")]
     pub ai_profiles: HashMap<String, AiProfile>,
+    #[serde(default)]
+    pub gemini_thinking_budget: i32,
     #[serde(default = "default_target_lang")]
     pub target_lang: String,
     #[serde(default = "default_true")]
@@ -175,6 +177,7 @@ impl Default for AppConfig {
             ai_api_key: String::new(),
             ai_model: default_ai_model(),
             ai_profiles: default_ai_profiles(),
+            gemini_thinking_budget: 0,
             target_lang: default_target_lang(),
             use_whisper_fallback: true,
             whisper_model: default_whisper_model(),
@@ -213,6 +216,7 @@ pub struct ConfigPatch {
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
     pub ai_profiles: Option<HashMap<String, AiProfile>>,
+    pub gemini_thinking_budget: Option<i32>,
     pub target_lang: Option<String>,
     pub use_whisper_fallback: Option<bool>,
     pub whisper_model: Option<String>,
@@ -343,6 +347,13 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(sd) = patch.use_speaker_diarization {
         cfg.use_speaker_diarization = sd;
+    }
+    if let Some(gtb) = patch.gemini_thinking_budget {
+        cfg.gemini_thinking_budget = match gtb {
+            0 | 1024 | -1 => gtb,
+            v if v < 0 => -1,
+            v => v.min(8192),
+        };
     }
     if let Some(tm) = patch.tts_mode {
         let clean = tm.trim().to_string();

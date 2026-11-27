@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.42] - 2026-11-27
+
+### Added & Improved
+- **Gemini Thinking Budget Control (UI + Backend):** Added a **Gemini Thinking** selector in **AI & Translate** (`0` = Off / cheapest default, `1024` = Light, `-1` = Model default) with automatic fallback if a Gemini model rejects `thinkingConfig`, cutting wasted thinking output tokens by ~90% on `gemini-3.8-flash`.
+- **Larger Translation Batches:** Increased `TRANSLATE_BATCH_SIZE` from `50` to `80` cues per request to reduce repeated prompt token overhead.
+
 ## [1.2.41] - 2026-11-27
 
 ### Improved
