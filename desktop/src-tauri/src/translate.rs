@@ -386,6 +386,15 @@ fn build_prev_context(translated_all: &[SubtitleCue], memory: &TranslationMemory
     }
 }
 
+fn is_hallucination_token(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let char_cnt = t.chars().count();
+    (char_cnt <= 3 && t.chars().all(|c| c.is_ascii_digit())) || char_cnt == 1
+}
+
 fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
     if cues.is_empty() {
         return;
@@ -420,7 +429,32 @@ fn cleanup_whisper_cues(cues: &mut Vec<SubtitleCue>) {
         }
         cleaned.push(cur);
     }
-    *cues = cleaned;
+
+    // Drop Whisper silence/music hallucination loops: >= 3 consecutive digit-only or 1-char cues
+    let mut filtered: Vec<SubtitleCue> = Vec::with_capacity(cleaned.len());
+    let mut i = 0;
+    while i < cleaned.len() {
+        if is_hallucination_token(&cleaned[i].original) {
+            let mut j = i + 1;
+            while j < cleaned.len() && is_hallucination_token(&cleaned[j].original) {
+                let same_text = cleaned[j].original == cleaned[i].original;
+                let both_digits = cleaned[i].original.chars().all(|c| c.is_ascii_digit())
+                    && cleaned[j].original.chars().all(|c| c.is_ascii_digit());
+                if same_text || both_digits {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j - i >= 3 {
+                i = j;
+                continue;
+            }
+        }
+        filtered.push(cleaned[i].clone());
+        i += 1;
+    }
+    *cues = filtered;
 }
 
 fn contains_cjk_or_kana(s: &str) -> bool {
@@ -2078,4 +2112,38 @@ pub async fn restore_subtitles_from_cloud(
         return Err(err_txt.trim().to_string());
     }
     Ok(list_cached_subtitles(data_dir).len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_cue(start_ms: u64, end_ms: u64, original: &str) -> SubtitleCue {
+        SubtitleCue {
+            start_ms,
+            end_ms,
+            original: original.to_string(),
+            translated: String::new(),
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn test_cleanup_whisper_hallucination_runs() {
+        let mut cues = vec![
+            mk_cue(1000, 2000, "陈默,快来。"),
+            mk_cue(2100, 2500, "3"),
+            mk_cue(2600, 3000, "3"),
+            mk_cue(3100, 3500, "4"),
+            mk_cue(3600, 4000, "5"),
+            mk_cue(4100, 4500, "一"),
+            mk_cue(4600, 5000, "一"),
+            mk_cue(5100, 5500, "一"),
+            mk_cue(6000, 7000, "嗯"),
+            mk_cue(7500, 8500, "我回来了"),
+        ];
+        cleanup_whisper_cues(&mut cues);
+        let texts: Vec<&str> = cues.iter().map(|c| c.original.as_str()).collect();
+        assert_eq!(texts, vec!["陈默,快来。", "嗯", "我回来了"]);
+    }
 }

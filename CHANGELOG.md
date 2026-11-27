@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.44] - 2026-11-27
+
+### Fixed & Improved
+- **Whisper Hallucination Loop Filter (`translate.rs`):** Dropped consecutive runs (`>= 3` cues) of digit-only or single-character Whisper silence/music hallucinations before translation while preserving genuine short dialogue, covered by unit test `test_cleanup_whisper_hallucination_runs`.
+- **Modular Feature Guide & Interactive Walkthrough (`README.md` / `docs/`):** Added a complete modular feature guide, 100% real-DOM interactive walkthrough (`demo.gif` + `demo.mp4` with VieNeu-TTS voiceover & English subtitles), and updated popup footer version.
+
 ## [1.2.43] - 2026-11-27
 
 ### Fixed
