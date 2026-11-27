@@ -1652,6 +1652,33 @@ pub async fn list_ai_models(config: &AppConfig) -> Result<Vec<String>, String> {
     Ok(models)
 }
 
+pub async fn resolve_youtube_title_if_missing(video_id: &str, title: String) -> String {
+    let trimmed = title.trim();
+    if !trimmed.is_empty() && trimmed != video_id {
+        return title;
+    }
+    let url = format!(
+        "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return title,
+    };
+    if let Ok(resp) = client.get(&url).send().await {
+        if resp.status().is_success() {
+            if let Ok(body) = resp.json::<Value>().await {
+                if let Some(t) = body["title"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                    return t.to_string();
+                }
+            }
+        }
+    }
+    title
+}
+
 pub async fn translate_video_subtitles<F>(
     data_dir: &Path,
     bin_dir: &Path,
@@ -1669,6 +1696,8 @@ where
             return Ok(cached);
         }
     }
+    let resolved_title = resolve_youtube_title_if_missing(video_id, title.to_string()).await;
+    let title = resolved_title.as_str();
 
     let target_cache = cache_path(data_dir, video_id, &config.target_lang);
     let mut bak_os = target_cache.as_os_str().to_os_string();

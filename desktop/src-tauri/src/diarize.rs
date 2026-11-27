@@ -215,10 +215,14 @@ struct SpeakerCluster {
     f0_samples: Vec<f32>,
     male_weight: f32,
     female_weight: f32,
+    locked_gender: Option<&'static str>,
 }
 
 impl SpeakerCluster {
     fn gender_tag(&self) -> &'static str {
+        if let Some(g) = self.locked_gender {
+            return g;
+        }
         let mut median_f0 = None;
         if !self.f0_samples.is_empty() {
             let mut sorted = self.f0_samples.clone();
@@ -229,15 +233,19 @@ impl SpeakerCluster {
         let ym_male = self.male_weight;
         let ym_female = self.female_weight;
         match median_f0 {
-            Some(f0) if f0 < 162.0 && ym_male >= ym_female * 0.75 => "Nam",
-            Some(f0) if f0 > 176.0 && ym_female >= ym_male * 0.75 => "Nữ",
-            Some(f0) if f0 < 145.0 => "Nam",
-            Some(f0) if f0 > 195.0 => "Nữ",
+            Some(f0) if f0 < 158.0 => "Nam",
+            Some(f0) if f0 > 176.0 => "Nữ",
             _ => {
                 if ym_male > ym_female * 1.4 && ym_male > 0.3 {
                     "Nam"
                 } else if ym_female > ym_male * 1.4 && ym_female > 0.3 {
                     "Nữ"
+                } else if let Some(f0) = median_f0 {
+                    if f0 < 167.0 {
+                        "Nam"
+                    } else {
+                        "Nữ"
+                    }
                 } else {
                     ""
                 }
@@ -344,8 +352,18 @@ impl SpeakerTracker {
             .as_mut()
             .ok_or_else(|| "WeSpeaker session unavailable".to_string())?;
 
-        let mut assigned_cluster: Vec<Option<usize>> = vec![None; cues.len()];
+        struct CueSample {
+            idx: usize,
+            dur_ms: u64,
+            rms: f32,
+            emb: Vec<f32>,
+            f0: Option<f32>,
+            ym_male: f32,
+            ym_female: f32,
+            speech_strength: f32,
+        }
 
+        let mut samples: Vec<CueSample> = Vec::with_capacity(cues.len());
         for (i, cue) in cues.iter().enumerate() {
             let rel_start_ms = cue.start_ms.saturating_sub(offset_ms);
             let rel_end_ms = cue.end_ms.saturating_sub(offset_ms);
@@ -385,56 +403,273 @@ impl SpeakerTracker {
             }
             l2_normalize(&mut emb);
 
-            let threshold = if dur_ms >= 800 { 0.60 } else { 0.52 };
-            let mut best_idx = None;
+            let f0 = estimate_median_f0_hz(slice);
+            let mut ym_male = 0.0_f32;
+            let mut ym_female = 0.0_f32;
+            let mut frame_cnt = 0usize;
+            if !yamnet_frames.is_empty() {
+                let f_start = (rel_start_ms as usize) / 480;
+                let f_end = ((rel_end_ms as usize) / 480 + 1).min(yamnet_frames.len());
+                frame_cnt = f_end.saturating_sub(f_start);
+                for f in f_start..f_end {
+                    ym_male += yamnet_frames[f].male;
+                    ym_female += yamnet_frames[f].female;
+                }
+            }
+            let speech_strength = if frame_cnt > 0 {
+                (ym_male + ym_female) / frame_cnt as f32
+            } else {
+                0.0
+            };
+
+            samples.push(CueSample {
+                idx: i,
+                dur_ms,
+                rms,
+                emb,
+                f0,
+                ym_male,
+                ym_female,
+                speech_strength,
+            });
+        }
+
+        if samples.is_empty() {
+            return Ok(vec![(String::new(), None); cues.len()]);
+        }
+
+        // Pass 1: Build clean Anchor Clusters via Agglomerative Clustering on long, clean utterances
+        let mut anchor_indices: Vec<usize> = samples
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.dur_ms >= 1400 && s.rms >= 0.006)
+            .map(|(k, _)| k)
+            .collect();
+        if anchor_indices.is_empty() {
+            anchor_indices = (0..samples.len()).collect();
+        }
+
+        struct MiniCluster {
+            first_sample_idx: usize,
+            centroid: Vec<f32>,
+            members: Vec<usize>,
+        }
+
+        let mut mini_clusters: Vec<MiniCluster> = Vec::new();
+        for &s_k in &anchor_indices {
+            let s = &samples[s_k];
+            // If existing clusters from prior chunks already match strongly, update them directly
+            let mut best_existing = None;
             let mut best_sim = -1.0_f32;
             for (c_idx, cl) in self.clusters.iter().enumerate() {
-                if cl.centroid.len() == emb.len() {
-                    let sim = cosine_sim(&emb, &cl.centroid);
+                if cl.centroid.len() == s.emb.len() {
+                    let sim = cosine_sim(&s.emb, &cl.centroid);
                     if sim > best_sim {
                         best_sim = sim;
-                        best_idx = Some(c_idx);
+                        best_existing = Some(c_idx);
                     }
                 }
             }
-
-            let target_idx = if best_sim >= threshold || self.clusters.len() >= 12 {
-                let idx = best_idx.unwrap_or(0);
-                // Only update centroid with longer, cleaner utterances
-                if dur_ms >= 800 {
-                    let cl = &mut self.clusters[idx];
+            if best_sim >= 0.50 {
+                if let Some(c_idx) = best_existing {
+                    let cl = &mut self.clusters[c_idx];
                     let n = cl.embed_count.min(40) as f32;
-                    for (c_val, &e_val) in cl.centroid.iter_mut().zip(emb.iter()) {
+                    for (c_val, &e_val) in cl.centroid.iter_mut().zip(s.emb.iter()) {
                         *c_val = (*c_val * n + e_val) / (n + 1.0);
                     }
                     l2_normalize(&mut cl.centroid);
                     cl.embed_count += 1;
+                    if let Some(f0) = s.f0 {
+                        cl.f0_samples.push(f0);
+                    }
+                    cl.male_weight += s.ym_male;
+                    cl.female_weight += s.ym_female;
+                    continue;
                 }
-                idx
-            } else {
-                let label = Self::next_label(self.clusters.len());
-                self.clusters.push(SpeakerCluster {
-                    label,
-                    centroid: emb,
-                    embed_count: 1,
-                    f0_samples: Vec::new(),
-                    male_weight: 0.0,
-                    female_weight: 0.0,
-                });
-                self.clusters.len() - 1
+            }
+            mini_clusters.push(MiniCluster {
+                first_sample_idx: s.idx,
+                centroid: s.emb.clone(),
+                members: vec![s_k],
+            });
+        }
+
+        // Agglomerative Hierarchical Clustering (merge closest pair while sim >= 0.43)
+        while mini_clusters.len() > 1 {
+            let mut best_pair = None;
+            let mut best_sim = -1.0_f32;
+            for a in 0..mini_clusters.len() {
+                for b in (a + 1)..mini_clusters.len() {
+                    let sim = cosine_sim(&mini_clusters[a].centroid, &mini_clusters[b].centroid);
+                    if sim > best_sim {
+                        best_sim = sim;
+                        best_pair = Some((a, b));
+                    }
+                }
+            }
+            if best_sim < 0.43 {
+                break;
+            }
+            if let Some((a, b)) = best_pair {
+                let b_cl = mini_clusters.remove(b);
+                let a_cl = &mut mini_clusters[a];
+                let wa = a_cl.members.len() as f32;
+                let wb = b_cl.members.len() as f32;
+                for (ca, &cb) in a_cl.centroid.iter_mut().zip(b_cl.centroid.iter()) {
+                    *ca = (*ca * wa + cb * wb) / (wa + wb);
+                }
+                l2_normalize(&mut a_cl.centroid);
+                a_cl.first_sample_idx = a_cl.first_sample_idx.min(b_cl.first_sample_idx);
+                a_cl.members.extend(b_cl.members);
+            }
+        }
+
+        // Merge singleton noise mini-clusters into nearest multi-member cluster if reasonably close
+        if mini_clusters.iter().filter(|m| m.members.len() >= 2).count() >= 1 {
+            let mut i = 0;
+            while i < mini_clusters.len() {
+                if mini_clusters[i].members.len() == 1 && mini_clusters.len() > 1 {
+                    let mut best_target = None;
+                    let mut best_sim = -1.0_f32;
+                    for j in 0..mini_clusters.len() {
+                        if i != j && mini_clusters[j].members.len() >= 2 {
+                            let sim = cosine_sim(&mini_clusters[i].centroid, &mini_clusters[j].centroid);
+                            if sim > best_sim {
+                                best_sim = sim;
+                                best_target = Some(j);
+                            }
+                        }
+                    }
+                    if best_sim >= 0.34 {
+                        if let Some(j) = best_target {
+                            let removed = mini_clusters.remove(i);
+                            let target_idx = if j > i { j - 1 } else { j };
+                            mini_clusters[target_idx].members.extend(removed.members);
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        // Order new anchor clusters chronologically by earliest cue, and register up to max 8 total
+        mini_clusters.sort_by_key(|m| m.first_sample_idx);
+        for mc in mini_clusters {
+            if self.clusters.len() >= 8 {
+                break;
+            }
+            let label = Self::next_label(self.clusters.len());
+            let mut f0_samples = Vec::new();
+            let mut male_weight = 0.0_f32;
+            let mut female_weight = 0.0_f32;
+            // Weight cleaner speech higher when computing anchor centroid
+            let mut centroid = vec![0.0_f32; mc.centroid.len()];
+            for &s_k in &mc.members {
+                let s = &samples[s_k];
+                let w = 1.0 + s.speech_strength.min(1.0);
+                for (c_val, &e_val) in centroid.iter_mut().zip(s.emb.iter()) {
+                    *c_val += e_val * w;
+                }
+                if let Some(f0) = s.f0 {
+                    f0_samples.push(f0);
+                }
+                male_weight += s.ym_male;
+                female_weight += s.ym_female;
+            }
+            l2_normalize(&mut centroid);
+            let mut cl = SpeakerCluster {
+                label,
+                centroid,
+                embed_count: mc.members.len(),
+                f0_samples,
+                male_weight,
+                female_weight,
+                locked_gender: None,
+            };
+            if cl.f0_samples.len() >= 5 {
+                let g = cl.gender_tag();
+                if !g.is_empty() {
+                    cl.locked_gender = Some(g);
+                }
+            }
+            self.clusters.push(cl);
+        }
+
+        // Pass 2: Assign ALL cues (including short/noisy ones) to the anchored clusters
+        let mut assigned_cluster: Vec<Option<usize>> = vec![None; cues.len()];
+        for s in &samples {
+            let cue_clear_gender = match s.f0 {
+                Some(f0) if f0 < 145.0 => Some("Nam"),
+                Some(f0) if f0 > 195.0 => Some("Nữ"),
+                _ => None,
             };
 
-            assigned_cluster[i] = Some(target_idx);
+            let mut best_idx = 0usize;
+            let mut best_sim = -1.0_f32;
+            let mut best_gender_idx = None;
+            let mut best_gender_sim = -1.0_f32;
 
-            if let Some(f0) = estimate_median_f0_hz(slice) {
-                self.clusters[target_idx].f0_samples.push(f0);
+            for (c_idx, cl) in self.clusters.iter().enumerate() {
+                if cl.centroid.len() == s.emb.len() {
+                    let sim = cosine_sim(&s.emb, &cl.centroid);
+                    if sim > best_sim {
+                        best_sim = sim;
+                        best_idx = c_idx;
+                    }
+                    if let Some(cg) = cue_clear_gender {
+                        if cl.gender_tag() == cg && sim > best_gender_sim {
+                            best_gender_sim = sim;
+                            best_gender_idx = Some(c_idx);
+                        }
+                    }
+                }
             }
-            if !yamnet_frames.is_empty() {
-                let f_start = (rel_start_ms as usize) / 480;
-                let f_end = ((rel_end_ms as usize) / 480 + 1).min(yamnet_frames.len());
-                for f in f_start..f_end {
-                    self.clusters[target_idx].male_weight += yamnet_frames[f].male;
-                    self.clusters[target_idx].female_weight += yamnet_frames[f].female;
+
+            let target_idx = if let (Some(cg), Some(g_idx)) = (cue_clear_gender, best_gender_idx) {
+                let best_g = self.clusters[best_idx].gender_tag();
+                if !best_g.is_empty() && best_g != cg && (best_sim - best_gender_sim <= 0.08 || best_sim < 0.46) {
+                    g_idx
+                } else {
+                    best_idx
+                }
+            } else {
+                best_idx
+            };
+
+            assigned_cluster[s.idx] = Some(target_idx);
+            if s.dur_ms >= 1000 && best_sim >= 0.48 {
+                if let Some(f0) = s.f0 {
+                    self.clusters[target_idx].f0_samples.push(f0);
+                }
+                self.clusters[target_idx].male_weight += s.ym_male;
+                self.clusters[target_idx].female_weight += s.ym_female;
+                if self.clusters[target_idx].locked_gender.is_none()
+                    && self.clusters[target_idx].f0_samples.len() >= 5
+                {
+                    let g = self.clusters[target_idx].gender_tag();
+                    if !g.is_empty() {
+                        self.clusters[target_idx].locked_gender = Some(g);
+                    }
+                }
+            }
+        }
+
+        // Pass 3: Smooth isolated short (< 1s) A -> X -> A flips when tightly sandwiched
+        if assigned_cluster.len() >= 3 {
+            let snapshot = assigned_cluster.clone();
+            for i in 1..(assigned_cluster.len() - 1) {
+                if let (Some(c_prev), Some(_), Some(c_next)) =
+                    (snapshot[i - 1], snapshot[i], snapshot[i + 1])
+                {
+                    if c_prev == c_next && snapshot[i] != Some(c_prev) {
+                        let dur_ms = cues[i].end_ms.saturating_sub(cues[i].start_ms);
+                        let gap_prev = cues[i].start_ms.saturating_sub(cues[i - 1].end_ms);
+                        let gap_next = cues[i + 1].start_ms.saturating_sub(cues[i].end_ms);
+                        if dur_ms < 1000 && gap_prev <= 600 && gap_next <= 600 {
+                            assigned_cluster[i] = Some(c_prev);
+                        }
+                    }
                 }
             }
         }

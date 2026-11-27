@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.41] - 2026-11-27
+
+### Improved
+- **2-Pass Anchor Clustering + AHC (`diarize.rs`):** Built clean anchor speaker clusters via Agglomerative Hierarchical Clustering on longer, cleaner utterances (`>= 1400ms`), assigned all short/noisy cues in Pass 2 with clear-F0 gender guard, locked cluster gender after `>= 5` F0 samples, smoothed isolated short `A -> X -> A` flips, and prevented YAMNet music noise from flipping `F0 > 176Hz` female clusters to Male.
+- **Auto-Fetch Missing Video Titles (`translate.rs` / `lib.rs`):** Automatically resolved YouTube video titles via YouTube oEmbed when `title` is empty or matches `video_id`, including on **Re-run** (`retranslate_subtitle_cache` / `rewhisper_subtitle_cache`).
+
 ## [1.2.40] - 2026-11-27
 
 ### Improved

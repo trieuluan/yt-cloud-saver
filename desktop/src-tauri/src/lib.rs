@@ -330,6 +330,7 @@ async fn retranslate_subtitle_cache(
     file_name: String,
 ) -> Result<Job, String> {
     let (video_id, title) = translate::prepare_retranslate_from_cache(&state.data_dir, &file_name)?;
+    let title = translate::resolve_youtube_title_if_missing(&video_id, title).await;
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     Ok(state.jobs.enqueue_translate(url, video_id, title).await)
 }
@@ -340,6 +341,7 @@ async fn rewhisper_subtitle_cache(
     file_name: String,
 ) -> Result<Job, String> {
     let (video_id, title) = translate::prepare_rewhisper_from_cache(&state.data_dir, &file_name)?;
+    let title = translate::resolve_youtube_title_if_missing(&video_id, title).await;
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     Ok(state.jobs.enqueue_translate(url, video_id, title).await)
 }
