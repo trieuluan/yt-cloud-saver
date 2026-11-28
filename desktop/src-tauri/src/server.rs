@@ -181,6 +181,31 @@ async fn get_subtitles(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CastUpdateBody {
+    cast: Option<std::collections::BTreeMap<String, String>>,
+    speaker_overrides: Option<std::collections::BTreeMap<String, String>>,
+}
+
+async fn post_subtitles_cast(
+    State(st): State<ServerState>,
+    Path(video_id): Path<String>,
+    Json(body): Json<CastUpdateBody>,
+) -> impl IntoResponse {
+    let cfg = load_config(&st.data_dir);
+    match crate::translate::update_cached_subtitle_cast(
+        &st.data_dir,
+        &video_id,
+        &cfg.target_lang,
+        body.cast,
+        body.speaker_overrides,
+    ) {
+        Ok(bundle) => (StatusCode::OK, Json(json!(bundle))),
+        Err(err) => (StatusCode::NOT_FOUND, Json(json!({ "error": err }))),
+    }
+}
+
 async fn get_saved_ids(State(st): State<ServerState>) -> impl IntoResponse {
     Json(st.jobs.get_saved_ids().await)
 }
@@ -456,6 +481,7 @@ pub async fn start_server(state: ServerState) {
         .route("/sync", post(post_sync))
         .route("/translate", post(post_translate))
         .route("/subtitles/{video_id}", get(get_subtitles))
+        .route("/subtitles/{video_id}/cast", post(post_subtitles_cast))
         .route("/stream/{video_id}", get(stream_video))
         .route("/tts", get(get_tts))
         .route("/tts/prepare", post(post_tts_prepare))

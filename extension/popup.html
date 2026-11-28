@@ -77,6 +77,17 @@
             <div class="label-sm" style="font-size:10.5px;">* Nhân vật phụ (F:C, M:D) tự động xoay sang giọng phụ khác để phân biệt.</div>
           </div>
 
+          <div id="castBox" class="space-y-sm hidden" style="padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);">
+            <div class="between">
+              <span class="label-sm" style="font-weight:600;color:#e6e8ec;">🎭 Cast trong tập này</span>
+              <label class="flex-row" style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:10.5px;color:#9aa3b2;">
+                <input id="autoMergeSmallToggle" type="checkbox" style="width:13px;height:13px;margin:0;" />
+                <span>Tự gộp cụm &lt;25 câu</span>
+              </label>
+            </div>
+            <div id="castList" class="space-y-sm" style="max-height:175px;overflow-y:auto;"></div>
+          </div>
+
           <div class="grid-2">
             <div class="mini-box">
               <div class="between">
@@ -255,7 +266,7 @@
     </section>
 
     <footer class="popup-footer">
-      <span class="footer-ver">YT Cloud Saver · v1.2.48</span>
+      <span class="footer-ver">YT Cloud Saver · v1.2.49</span>
       <button id="popSupportBtn" class="footer-link" type="button">☕ Support</button>
     </footer>
 

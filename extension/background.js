@@ -77,6 +77,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         });
       case 'GET_SUBTITLES':
         return await apiFetch(`/subtitles/${encodeURIComponent(msg.videoId)}`);
+      case 'UPDATE_SUBTITLE_CAST':
+        return await apiFetch(`/subtitles/${encodeURIComponent(msg.videoId)}/cast`, {
+          method: 'POST',
+          body: JSON.stringify({
+            cast: msg.cast,
+            speakerOverrides: msg.speakerOverrides,
+          }),
+        });
+      case 'SET_ACTIVE_VIDEO': {
+        await chrome.storage.local.set({
+          activeVideo: { videoId: msg.videoId || '', title: msg.title || '' },
+        });
+        return { ok: true };
+      }
+      case 'GET_ACTIVE_VIDEO': {
+        const res = await chrome.storage.local.get({ activeVideo: { videoId: '', title: '' } });
+        return res.activeVideo;
+      }
       case 'PREPARE_TTS':
         return await apiFetch('/tts/prepare', {
           method: 'POST',

@@ -2,6 +2,15 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.49] - 2026-11-29
+
+### Added
+- **Episode Cast & Per-Character Voice Mapping**:
+  - Added `cast` and `speakerOverrides` support in subtitle bundles (`translate.rs`) and LLM translation prompts so speakers in an episode can be identified and mapped consistently.
+  - Added `POST /subtitles/{video_id}/cast` endpoint (`server.rs`) and `UPDATE_SUBTITLE_CAST` / `SET_ACTIVE_VIDEO` / `GET_ACTIVE_VIDEO` messaging (`background.js`) to persist and sync cast edits live.
+  - Added Episode Cast UI in the extension popup (`popup.html`, `popup.js`) with per-speaker voice selection, character name editing, gender swap, merge-to-lead, and an auto-merge toggle for small speaker clusters.
+  - Updated live dubbing voice routing (`content.js`, `player.js`) to apply `speakerOverrides` and `autoMergeSmallClusters` in real time, while remaining backward-compatible with older subtitle files.
+
 ## [1.2.48] - 2026-11-29
 
 ### Fixed

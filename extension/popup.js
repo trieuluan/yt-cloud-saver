@@ -46,6 +46,9 @@ const singleVoiceBox = document.getElementById('singleVoiceBox');
 const multiVoiceBox = document.getElementById('multiVoiceBox');
 const dubFemaleSelect = document.getElementById('dubFemaleSelect');
 const dubMaleSelect = document.getElementById('dubMaleSelect');
+const castBox = document.getElementById('castBox');
+const castListEl = document.getElementById('castList');
+const autoMergeSmallToggle = document.getElementById('autoMergeSmallToggle');
 const remoteSuggestions = document.getElementById('remoteSuggestions');
 const browseBtn = document.getElementById('browseBtn');
 const browserBox = document.getElementById('browserBox');
@@ -80,6 +83,7 @@ const DEFAULT_SUB_STYLE = {
   multiVoice: false,
   dubFemaleVoice: 'vieneu:Ngọc Huyền',
   dubMaleVoice: 'vieneu:Hải Đăng',
+  autoMergeSmallClusters: false,
   hardsubCover: 'blur',
   showSigns: true,
 };
@@ -137,7 +141,9 @@ function renderSubStyle() {
   const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
   const eng = curVoice === 'browser' ? 'browser' : curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
   if (multiVoiceToggle) multiVoiceToggle.checked = Boolean(subStyle.multiVoice);
+  if (autoMergeSmallToggle) autoMergeSmallToggle.checked = Boolean(subStyle.autoMergeSmallClusters);
   renderDubEngine(eng, curVoice);
+  renderCastSection();
   dubSpeedSelect.value = String(Number(subStyle.dubSpeed ?? 1));
   if (dubSpeedBadge) dubSpeedBadge.textContent = `${Number(subStyle.dubSpeed ?? 1).toFixed(1)}x`;
   const volPct = Math.round(Number(subStyle.dubVolume ?? 0.15) * 100);
@@ -270,11 +276,161 @@ async function loadCustomVieneuVoices() {
   }
 }
 
+let activeEpisodeId = '';
+let activeEpisodeBundle = null;
+
+function getSpeakerVoicePool(eng) {
+  if (eng === 'edge') return EDGE_VOICES;
+  return [
+    ...customVieneuVoices.map((v) => ({ value: `vieneu:custom:${v.id}`, label: `🎙 ${v.name}` })),
+    ...VIENEU_PRESET_VOICES.filter((v) => v.value !== 'vieneu:default'),
+  ];
+}
+
+function getDefaultVoiceForCode(code, idx, eng) {
+  const sp = String(code || '');
+  if (eng === 'edge') {
+    return sp.startsWith('M:') ? 'vi-VN-NamMinhNeural' : 'vi-VN-HoaiMyNeural';
+  }
+  if (sp.startsWith('M:')) {
+    const mPool = [
+      subStyle.dubMaleVoice || 'vieneu:Hải Đăng',
+      'vieneu:Thiện Minh',
+      'vieneu:Quang Sơn',
+      'vieneu:Thái Sơn',
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+    return mPool[idx % mPool.length];
+  }
+  const fPool = [
+    subStyle.dubFemaleVoice || 'vieneu:Ngọc Huyền',
+    'vieneu:Thùy Dung',
+    'vieneu:Trúc Ly',
+    'vieneu:Ngọc Trân',
+  ].filter((v, i, a) => v && a.indexOf(v) === i);
+  return fPool[idx % fPool.length];
+}
+
+function renderCastSection() {
+  if (!castBox || !castListEl) return;
+  const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+  const eng = curVoice === 'browser' ? 'browser' : curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
+  const cues = activeEpisodeBundle?.cues;
+  if (!subStyle.multiVoice || eng === 'browser' || !Array.isArray(cues) || !cues.length) {
+    castBox.classList.add('hidden');
+    return;
+  }
+
+  const counts = new Map();
+  for (const c of cues) {
+    if (c?.speaker) {
+      counts.set(c.speaker, (counts.get(c.speaker) || 0) + 1);
+    }
+  }
+  if (!counts.size) {
+    castBox.classList.add('hidden');
+    return;
+  }
+
+  castBox.classList.remove('hidden');
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const leadMale = sorted.find(([c]) => c.startsWith('M:'))?.[0] || '';
+  const leadFemale = sorted.find(([c]) => c.startsWith('F:'))?.[0] || '';
+  const castMap = activeEpisodeBundle.cast || {};
+  const overrides = activeEpisodeBundle.speakerOverrides || {};
+  const pool = getSpeakerVoicePool(eng);
+
+  let mSeen = 0;
+  let fSeen = 0;
+  castListEl.innerHTML = sorted
+    .map(([code, cnt]) => {
+      const isMale = code.startsWith('M:');
+      const slotIdx = isMale ? mSeen++ : fSeen++;
+      const isLead = code === leadMale || code === leadFemale;
+      const ov = overrides[code] || '';
+      const isMerged = ov.startsWith('merge:');
+      const mergeTarget = isMerged ? ov.slice('merge:'.length) : '';
+      const defName = isMale
+        ? code === leadMale
+          ? 'Nam chính'
+          : `Nam phụ ${code.split(':')[1] || ''}`
+        : code === leadFemale
+          ? 'Nữ chính'
+          : `Nữ phụ ${code.split(':')[1] || ''}`;
+      const displayName = castMap[code] || defName;
+      const selectedVoice = !isMerged && ov ? ov : getDefaultVoiceForCode(code, slotIdx, eng);
+      const mergeTargetName = mergeTarget ? (castMap[mergeTarget] || mergeTarget) : '';
+      const badgeCol = isMale ? '#60a5fa' : '#f472b6';
+
+      const voiceCtrl = isMerged
+        ? `<span style="font-size:10.5px;color:#86efac;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🔗 Chung giọng: ${escapeHtml(mergeTargetName)}</span>`
+        : `<select data-cast-voice="${escapeHtml(code)}" class="select-full" style="padding:3px 6px;font-size:11px;min-width:0;flex:1;">
+            ${pool.map((v) => `<option value="${escapeHtml(v.value)}" ${v.value === selectedVoice ? 'selected' : ''}>${escapeHtml(v.label.replace(/^VieNeu · /, ''))}</option>`).join('')}
+          </select>`;
+
+      const mergeBtn = !isLead
+        ? `<button type="button" data-cast-merge="${escapeHtml(code)}" data-cast-target="${escapeHtml(isMale ? (leadMale || leadFemale) : (leadFemale || leadMale))}" class="btn-xs-inline" style="padding:3px 6px;font-size:10.5px;${isMerged ? 'border-color:#3b82f6;color:#93c5fd;' : ''}" title="Gộp vào giọng nhân vật chính">${isMerged ? 'Tách' : '🔗 Gộp'}</button>`
+        : '';
+
+      return `
+        <div class="mini-box" style="padding:6px 8px;gap:4px;display:flex;flex-direction:column;">
+          <div class="between" style="gap:6px;">
+            <div style="display:flex;align-items:center;gap:5px;min-width:0;flex:1;">
+              <span style="font-family:monospace;font-size:10.5px;font-weight:700;color:${badgeCol};background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px;flex-shrink:0;">${escapeHtml(code)}</span>
+              <input type="text" data-cast-name="${escapeHtml(code)}" value="${escapeHtml(displayName)}" style="padding:2px 5px;font-size:11px;background:transparent;border:1px solid transparent;border-radius:4px;color:#e6e8ec;min-width:0;flex:1;" title="Bấm để sửa tên nhân vật" />
+            </div>
+            <span class="label-sm" style="font-size:10px;flex-shrink:0;">${cnt} câu</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            ${voiceCtrl}
+            <button type="button" data-cast-swap="${escapeHtml(code)}" class="btn-xs-inline" style="padding:3px 6px;font-size:10.5px;" title="Đảo nhanh giọng Nam ↔ Nữ">⇄</button>
+            ${mergeBtn}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+async function persistActiveCastUpdate(nextCast, nextOverrides) {
+  if (!activeEpisodeId) return;
+  try {
+    const updated = await sendBg('UPDATE_SUBTITLE_CAST', {
+      videoId: activeEpisodeId,
+      cast: nextCast,
+      speakerOverrides: nextOverrides,
+    });
+    activeEpisodeBundle = updated;
+    renderCastSection();
+    await chrome.storage.local.set({ castSyncTick: Date.now() });
+  } catch {
+    // Ignore if offline
+  }
+}
+
+async function loadActiveEpisodeCast() {
+  try {
+    const active = await sendBg('GET_ACTIVE_VIDEO');
+    const vid = active?.videoId || '';
+    if (!vid) return;
+    if (vid !== activeEpisodeId || !activeEpisodeBundle) {
+      activeEpisodeId = vid;
+      const bundle = await sendBg('GET_SUBTITLES', { videoId: vid }).catch(() => null);
+      if (bundle) {
+        activeEpisodeBundle = bundle;
+        renderCastSection();
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 async function loadSubStyle() {
   const res = await chrome.storage.local.get({ subStyle: DEFAULT_SUB_STYLE });
   subStyle = { ...DEFAULT_SUB_STYLE, ...(res.subStyle || {}) };
   renderSubStyle();
   loadCustomVieneuVoices();
+  loadActiveEpisodeCast();
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -582,6 +738,58 @@ dubVoiceSelect.addEventListener('change', () => {
 multiVoiceToggle?.addEventListener('change', () => {
   subStyle.multiVoice = multiVoiceToggle.checked;
   saveSubStyle();
+});
+autoMergeSmallToggle?.addEventListener('change', () => {
+  subStyle.autoMergeSmallClusters = autoMergeSmallToggle.checked;
+  saveSubStyle();
+  chrome.storage.local.set({ castSyncTick: Date.now() });
+});
+castListEl?.addEventListener('change', (e) => {
+  const voiceCode = e.target.getAttribute('data-cast-voice');
+  const nameCode = e.target.getAttribute('data-cast-name');
+  if (voiceCode && activeEpisodeBundle) {
+    const nextOv = { ...(activeEpisodeBundle.speakerOverrides || {}), [voiceCode]: e.target.value };
+    persistActiveCastUpdate(null, nextOv);
+  } else if (nameCode && activeEpisodeBundle) {
+    const nextCast = { ...(activeEpisodeBundle.cast || {}), [nameCode]: e.target.value.trim() };
+    persistActiveCastUpdate(nextCast, null);
+  }
+});
+castListEl?.addEventListener('click', (e) => {
+  const mergeBtn = e.target.closest('[data-cast-merge]');
+  const swapBtn = e.target.closest('[data-cast-swap]');
+  if (mergeBtn && activeEpisodeBundle) {
+    const code = mergeBtn.getAttribute('data-cast-merge');
+    const target = mergeBtn.getAttribute('data-cast-target');
+    const nextOv = { ...(activeEpisodeBundle.speakerOverrides || {}) };
+    if (String(nextOv[code] || '').startsWith('merge:')) {
+      delete nextOv[code];
+    } else if (target) {
+      nextOv[code] = `merge:${target}`;
+    }
+    persistActiveCastUpdate(null, nextOv);
+  } else if (swapBtn && activeEpisodeBundle) {
+    const code = swapBtn.getAttribute('data-cast-swap');
+    const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    const eng = curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
+    const nextOv = { ...(activeEpisodeBundle.speakerOverrides || {}) };
+    const curAssigned = nextOv[code] || '';
+    const isCurrentlyMale =
+      curAssigned.includes('NamMinh') ||
+      curAssigned.includes('Hải Đăng') ||
+      curAssigned.includes('Thiện Minh') ||
+      curAssigned.includes('Quang Sơn') ||
+      curAssigned.includes('Thái Sơn') ||
+      (!curAssigned && code.startsWith('M:'));
+    nextOv[code] = isCurrentlyMale
+      ? eng === 'edge'
+        ? 'vi-VN-HoaiMyNeural'
+        : subStyle.dubFemaleVoice || 'vieneu:Ngọc Huyền'
+      : eng === 'edge'
+        ? 'vi-VN-NamMinhNeural'
+        : subStyle.dubMaleVoice || 'vieneu:Hải Đăng';
+    persistActiveCastUpdate(null, nextOv);
+  }
 });
 dubFemaleSelect?.addEventListener('change', () => {
   subStyle.dubFemaleVoice = dubFemaleSelect.value;

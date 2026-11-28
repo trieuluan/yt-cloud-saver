@@ -35,6 +35,10 @@ pub struct SubtitleBundle {
     pub partial: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub glossary: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cast: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub speaker_overrides: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scene_note: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -385,6 +389,7 @@ struct IndexedSubtitleLine {
 #[derive(Default)]
 struct TranslationMemory {
     glossary: Vec<(String, String)>,
+    cast: BTreeMap<String, String>,
     scene_note: String,
 }
 
@@ -396,6 +401,7 @@ impl TranslationMemory {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            cast: bundle.cast.clone(),
             scene_note: bundle.scene_note.clone(),
         }
     }
@@ -408,6 +414,15 @@ impl TranslationMemory {
     }
 
     fn merge(&mut self, new_entries: BTreeMap<String, String>, new_scene: Option<String>) {
+        self.merge_with_cast(new_entries, BTreeMap::new(), new_scene);
+    }
+
+    fn merge_with_cast(
+        &mut self,
+        new_entries: BTreeMap<String, String>,
+        new_cast: BTreeMap<String, String>,
+        new_scene: Option<String>,
+    ) {
         for (k, v) in new_entries {
             let src = k.trim().to_string();
             let dst = v.trim().to_string();
@@ -420,6 +435,13 @@ impl TranslationMemory {
                 self.glossary.push((src, dst));
             }
         }
+        for (code, name) in new_cast {
+            let c = normalize_cast_code(&code);
+            let n = name.trim().to_string();
+            if !c.is_empty() && !n.is_empty() && !self.cast.contains_key(&c) {
+                self.cast.insert(c, n);
+            }
+        }
         if let Some(sc) = new_scene {
             let clean = sc.trim().to_string();
             if !clean.is_empty() {
@@ -429,12 +451,40 @@ impl TranslationMemory {
     }
 }
 
+fn normalize_cast_code(raw: &str) -> String {
+    let clean = raw
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim();
+    if let Some((g, lbl)) = clean.split_once('·') {
+        let g_l = g.trim().to_lowercase();
+        let l = lbl.trim().to_uppercase();
+        if g_l.starts_with("nam") || g_l == "m" {
+            return format!("M:{l}");
+        }
+        if g_l.starts_with("nữ") || g_l.starts_with("nu") || g_l == "f" {
+            return format!("F:{l}");
+        }
+    }
+    if let Some((prefix, lbl)) = clean.split_once(':') {
+        let p = prefix.trim().to_uppercase();
+        let l = lbl.trim().to_uppercase();
+        if matches!(p.as_str(), "M" | "F" | "U") && !l.is_empty() {
+            return format!("{p}:{l}");
+        }
+    }
+    String::new()
+}
+
 #[derive(Deserialize)]
 struct BatchTranslationObj {
     #[serde(default)]
     lines: Vec<IndexedSubtitleLine>,
     #[serde(default)]
     glossary: BTreeMap<String, String>,
+    #[serde(default)]
+    cast: BTreeMap<String, String>,
     #[serde(default)]
     scene: Option<String>,
 }
@@ -673,7 +723,7 @@ fn build_translation_prompt(
         String::new()
     };
     let output_rule = if with_memory {
-        "4. Return ONLY a JSON object: {\"lines\":[{\"i\":0,\"t\":\"...\"},...],\"glossary\":{\"source_term\":\"translated_name\"},\"scene\":\"1-sentence current scene, active speakers & their relationship/pronouns\"}. In \"glossary\", ONLY include NEW character names, proper nouns, or ASR homophone aliases discovered in this batch (leave {} if none). Keep \"lines\" with exact same \"i\" indices; do NOT merge, split, or skip lines."
+        "4. Return ONLY a JSON object: {\"lines\":[{\"i\":0,\"t\":\"...\"},...],\"glossary\":{\"source_term\":\"translated_name\"},\"cast\":{\"M:A\":\"Character Name or Role\"},\"scene\":\"1-sentence current scene, active speakers & their relationship/pronouns\"}. In \"glossary\", ONLY include NEW character names, proper nouns, or ASR homophone aliases discovered in this batch (leave {} if none). In \"cast\", ONLY map speaker tags (like \"M:A\", \"F:B\") to their clear character name/role if identifiable in this batch (leave {} if none). Keep \"lines\" with exact same \"i\" indices; do NOT merge, split, or skip lines."
     } else {
         "4. Return ONLY a JSON array of objects with the exact same \"i\" indices and translated \"t\" strings: [{\"i\":0,\"t\":\"...\"}, ...]. Do NOT merge, split, or skip lines."
     };
@@ -715,7 +765,7 @@ async fn translate_indexed_subset(
             if let Ok(parsed) = serde_json::from_str::<BatchTranslationObj>(slice) {
                 if !parsed.lines.is_empty() {
                     if let Some(mem) = memory {
-                        mem.merge(parsed.glossary, parsed.scene);
+                        mem.merge_with_cast(parsed.glossary, parsed.cast, parsed.scene);
                     }
                     return Ok(parsed
                         .lines
@@ -877,6 +927,8 @@ async fn translate_cue_batches(
             hardsub_box: None,
             partial: true,
             glossary: memory.to_glossary_map(),
+            cast: memory.cast.clone(),
+            speaker_overrides: BTreeMap::new(),
             scene_note: memory.scene_note.clone(),
             signs: Vec::new(),
             cues: translated_all.clone(),
@@ -953,6 +1005,47 @@ async fn translate_signs_and_enrich_glossary(
 
     signs.retain(|s| !is_skipped_sign_translation(&s.translated));
     Ok(())
+}
+
+pub fn update_cached_subtitle_cast(
+    data_dir: &Path,
+    video_id: &str,
+    target_lang: &str,
+    cast: Option<BTreeMap<String, String>>,
+    speaker_overrides: Option<BTreeMap<String, String>>,
+) -> Result<SubtitleBundle, String> {
+    let mut bundle = load_cached_subtitles(data_dir, video_id, target_lang)
+        .ok_or_else(|| "No cached subtitles found for this video".to_string())?;
+    if let Some(new_cast) = cast {
+        bundle.cast = new_cast
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let ck = k.trim().to_string();
+                let cv = v.trim().to_string();
+                if ck.is_empty() || cv.is_empty() {
+                    None
+                } else {
+                    Some((ck, cv))
+                }
+            })
+            .collect();
+    }
+    if let Some(new_ov) = speaker_overrides {
+        bundle.speaker_overrides = new_ov
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let ck = k.trim().to_string();
+                let cv = v.trim().to_string();
+                if ck.is_empty() || cv.is_empty() {
+                    None
+                } else {
+                    Some((ck, cv))
+                }
+            })
+            .collect();
+    }
+    save_cached_subtitles(data_dir, &bundle);
+    Ok(bundle)
 }
 
 pub fn load_cached_subtitles(
@@ -1699,6 +1792,8 @@ where
                 hardsub_box,
                 partial: !is_final_seg_and_batch,
                 glossary: memory.to_glossary_map(),
+                cast: memory.cast.clone(),
+                speaker_overrides: BTreeMap::new(),
                 scene_note: memory.scene_note.clone(),
                 signs: signs_all.clone(),
                 cues: translated_all.clone(),
@@ -1717,6 +1812,8 @@ where
                 hardsub_box,
                 partial: seg_idx + 1 < total_segs,
                 glossary: memory.to_glossary_map(),
+                cast: memory.cast.clone(),
+                speaker_overrides: BTreeMap::new(),
                 scene_note: memory.scene_note.clone(),
                 signs: signs_all.clone(),
                 cues: translated_all.clone(),
@@ -2729,6 +2826,8 @@ where
             hardsub_box,
             partial: false,
             glossary: extracted_memory.to_glossary_map(),
+            cast: extracted_memory.cast.clone(),
+            speaker_overrides: BTreeMap::new(),
             scene_note: extracted_memory.scene_note.clone(),
             signs,
             cues,
@@ -2794,6 +2893,8 @@ where
             hardsub_box: hardsub_box.clone(),
             partial: !is_last,
             glossary: memory.to_glossary_map(),
+            cast: memory.cast.clone(),
+            speaker_overrides: BTreeMap::new(),
             scene_note: memory.scene_note.clone(),
             signs: signs.clone(),
             cues: translated_all.clone(),
@@ -2810,6 +2911,8 @@ where
         hardsub_box,
         partial: false,
         glossary: memory.to_glossary_map(),
+        cast: memory.cast,
+        speaker_overrides: BTreeMap::new(),
         scene_note: memory.scene_note,
         signs,
         cues: translated_all,
@@ -3094,6 +3197,8 @@ pub fn write_srt_file(bundle: &SubtitleBundle, dest: &Path) -> Result<(), String
         hardsub_box: bundle.hardsub_box,
         partial: bundle.partial,
         glossary: BTreeMap::new(),
+        cast: BTreeMap::new(),
+        speaker_overrides: BTreeMap::new(),
         scene_note: String::new(),
         signs: Vec::new(),
         cues: normalize_cues_for_mov_text(&bundle.cues),
@@ -3267,6 +3372,8 @@ mod tests {
             }),
             partial: true,
             glossary: mem.to_glossary_map(),
+            cast: mem.cast.clone(),
+            speaker_overrides: BTreeMap::new(),
             scene_note: mem.scene_note.clone(),
             signs: vec![crate::ocr::SignCue {
                 start_ms: 1500,

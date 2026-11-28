@@ -33,6 +33,7 @@
     multiVoice: false,
     dubFemaleVoice: 'vieneu:Ngọc Huyền',
     dubMaleVoice: 'vieneu:Hải Đăng',
+    autoMergeSmallClusters: false,
     hardsubCover: 'blur',
     showSigns: true,
   };
@@ -53,6 +54,23 @@
       if (dubEnabled && savedVolume !== null) {
         const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
         if (video) video.volume = Math.min(savedVolume, Number(subStyle.dubVolume ?? 0.15));
+      }
+    }
+    if (area === 'local' && changes.castSyncTick?.newValue) {
+      const vid = getVideoId();
+      if (vid) {
+        sendBg('GET_SUBTITLES', { videoId: vid })
+          .then((fresh) => {
+            if (fresh && getVideoId() === vid) {
+              subBundle = fresh;
+              speakerVoiceMap.clear();
+              speakerCountCache = null;
+              ttsAudioCache.clear();
+              preparedFromIdx = -1;
+              preparedUpToIdx = -1;
+            }
+          })
+          .catch(() => {});
       }
     }
   });
@@ -924,10 +942,47 @@
   }
 
   const speakerVoiceMap = new Map();
+  let speakerCountCache = null;
+
+  function getEffectiveSpeakerCode(rawSpeaker) {
+    let sp = String(rawSpeaker || '');
+    if (!sp) return '';
+    const overrides = subBundle?.speakerOverrides || {};
+    const ov = overrides[sp];
+    if (ov && ov.startsWith('merge:')) {
+      return ov.slice('merge:'.length);
+    }
+    if (!ov && subStyle.autoMergeSmallClusters && subBundle?.cues?.length) {
+      if (!speakerCountCache || speakerCountCache.cuesRef !== subBundle.cues) {
+        const counts = new Map();
+        for (const c of subBundle.cues) {
+          if (c?.speaker) counts.set(c.speaker, (counts.get(c.speaker) || 0) + 1);
+        }
+        const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+        speakerCountCache = {
+          cuesRef: subBundle.cues,
+          counts,
+          leadMale: sorted.find(([k]) => k.startsWith('M:'))?.[0] || '',
+          leadFemale: sorted.find(([k]) => k.startsWith('F:'))?.[0] || '',
+        };
+      }
+      const cnt = speakerCountCache.counts.get(sp) || 0;
+      if (cnt > 0 && cnt < 25) {
+        const lead = sp.startsWith('M:') ? speakerCountCache.leadMale : speakerCountCache.leadFemale;
+        if (lead && lead !== sp) return lead;
+      }
+    }
+    return sp;
+  }
+
   function resolveCueVoice(cue) {
     const base = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
     if (base === 'browser' || !subStyle.multiVoice || !cue?.speaker) return base;
-    const sp = String(cue.speaker);
+    const sp = getEffectiveSpeakerCode(cue.speaker);
+    const directOv = subBundle?.speakerOverrides?.[sp];
+    if (directOv && !directOv.startsWith('merge:')) {
+      return directOv;
+    }
     const isVieneu = base.startsWith('vieneu:');
     if (!isVieneu) {
       if (sp.startsWith('F:')) return 'vi-VN-HoaiMyNeural';
@@ -1549,6 +1604,9 @@
     removeCloudPlayer();
     removeSubOverlay();
     subBundle = null;
+    speakerVoiceMap.clear();
+    speakerCountCache = null;
+    sendBg('SET_ACTIVE_VIDEO', { videoId: videoId || '', title: videoId ? getVideoTitle() : '' }).catch(() => {});
     subMode = 'off';
     subCycleStartMode = null;
     translateInFlight = null;

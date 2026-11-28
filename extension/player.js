@@ -59,6 +59,10 @@
     dubVoice: 'vi-VN-HoaiMyNeural',
     dubSpeed: 1.0,
     dubVolume: 0.15,
+    multiVoice: false,
+    dubFemaleVoice: 'vieneu:Ngọc Huyền',
+    dubMaleVoice: 'vieneu:Hải Đăng',
+    autoMergeSmallClusters: false,
     hardsubCover: 'blur',
     showSigns: true,
   };
@@ -79,6 +83,17 @@
       if (dubEnabled && savedVolume !== null) {
         videoEl.volume = Math.min(savedVolume, Number(subStyle.dubVolume ?? 0.15));
       }
+    }
+    if (area === 'local' && changes.castSyncTick?.newValue) {
+      sendBg('GET_SUBTITLES', { videoId })
+        .then((fresh) => {
+          if (fresh) {
+            subBundle = fresh;
+            ttsAudioCache.clear();
+            preparedUpToIdx = -1;
+          }
+        })
+        .catch(() => {});
     }
   });
 
@@ -328,7 +343,23 @@
       } catch {}
     }
 
-    const voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    let voice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
+    if (voice !== 'browser' && subStyle.multiVoice && cue?.speaker) {
+      let sp = String(cue.speaker);
+      const ov = subBundle?.speakerOverrides?.[sp];
+      if (ov && ov.startsWith('merge:')) sp = ov.slice('merge:'.length);
+      const direct = subBundle?.speakerOverrides?.[sp];
+      if (direct && !direct.startsWith('merge:')) {
+        voice = direct;
+      } else if (!voice.startsWith('vieneu:')) {
+        if (sp.startsWith('F:')) voice = 'vi-VN-HoaiMyNeural';
+        else if (sp.startsWith('M:')) voice = 'vi-VN-NamMinhNeural';
+      } else {
+        voice = sp.startsWith('M:')
+          ? subStyle.dubMaleVoice || 'vieneu:Hải Đăng'
+          : subStyle.dubFemaleVoice || 'vieneu:Ngọc Huyền';
+      }
+    }
     if (voice === 'browser') {
       speakCueBrowser(text, cue, mySeq);
       return;
