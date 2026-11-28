@@ -244,7 +244,7 @@ pub fn merge_roi_frames_into_cues(
             .filter(|b| {
                 let cx = b.center_x();
                 let norm = normalize_ocr_text(&b.text);
-                b.confidence >= 0.56
+                b.confidence >= 0.45
                     && (0.16..=0.84).contains(&cx)
                     && !norm.is_empty()
                     && !is_noise_or_watermark_token(&norm)

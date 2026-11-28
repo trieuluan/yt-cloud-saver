@@ -176,7 +176,7 @@ pub fn extract_frame_signs(
         .iter()
         .filter(|b| {
             let clean = normalize_ocr_text(&b.text);
-            b.confidence >= 0.66
+            b.confidence >= 0.48
                 && !clean.is_empty()
                 && !is_noise_or_watermark_token(&clean)
                 && b.height * upper_height_ratio >= 0.022

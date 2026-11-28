@@ -2,6 +2,11 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.48] - 2026-11-29
+
+### Fixed
+- **Apple Vision CJK Confidence Tier (`ocr/pipeline.rs` / `ocr/signs.rs`):** Lowered the OCR acceptance threshold from `0.56` (`0.66` for signs) to `0.45` (`0.48` for signs) so valid CJK dialogue and scene signs where Apple Vision `VNRecognizeTextRequest` outputs its `0.500` confidence tier (e.g. short phrases or white text on bright paper) are retained while `0.300` background table noise remains filtered out.
+
 ## [1.2.47] - 2026-11-28
 
 ### Fixed & Improved
