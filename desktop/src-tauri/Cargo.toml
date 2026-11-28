@@ -1,6 +1,6 @@
 [package]
 name = "yt-cloud-saver-desktop"
-version = "1.2.45"
+version = "1.2.46"
 description = "YT Cloud Saver Desktop Companion App"
 authors = ["Louis"]
 edition = "2021"
@@ -30,3 +30,4 @@ sha2 = "0.10"
 ort = "2.0.0-rc.15"
 hound = "3.5"
 rustfft = "6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

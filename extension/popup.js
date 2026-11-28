@@ -17,6 +17,8 @@ const bgBtns = document.querySelectorAll('.bg-btn');
 const bgColorPicker = document.getElementById('bgColorPicker');
 const opacitySlider = document.getElementById('opacitySlider');
 const opacityLabel = document.getElementById('opacityLabel');
+const coverBtns = document.querySelectorAll('.cover-btn');
+const showSignsToggle = document.getElementById('showSignsToggle');
 const prevOrig = document.getElementById('prevOrig');
 const prevTr = document.getElementById('prevTr');
 const dubVolSlider = document.getElementById('dubVolSlider');
@@ -78,6 +80,8 @@ const DEFAULT_SUB_STYLE = {
   multiVoice: false,
   dubFemaleVoice: 'vieneu:Ngọc Huyền',
   dubMaleVoice: 'vieneu:Hải Đăng',
+  hardsubCover: 'blur',
+  showSigns: true,
 };
 
 let subStyle = { ...DEFAULT_SUB_STYLE };
@@ -127,6 +131,9 @@ function renderSubStyle() {
 
   opacitySlider.value = subStyle.bgOpacity;
   opacityLabel.textContent = `${subStyle.bgOpacity}%`;
+  const curCover = subStyle.hardsubCover || 'blur';
+  coverBtns.forEach((b) => b.classList.toggle('active', b.dataset.cover === curCover));
+  if (showSignsToggle) showSignsToggle.checked = subStyle.showSigns !== false;
   const curVoice = subStyle.dubVoice || 'vi-VN-HoaiMyNeural';
   const eng = curVoice === 'browser' ? 'browser' : curVoice.startsWith('vieneu:') ? 'vieneu' : 'edge';
   if (multiVoiceToggle) multiVoiceToggle.checked = Boolean(subStyle.multiVoice);
@@ -556,6 +563,16 @@ bgColorPicker.addEventListener('input', () => {
 });
 opacitySlider.addEventListener('input', () => {
   subStyle.bgOpacity = Number(opacitySlider.value);
+  saveSubStyle();
+});
+coverBtns.forEach((b) =>
+  b.addEventListener('click', () => {
+    subStyle.hardsubCover = b.dataset.cover || 'blur';
+    saveSubStyle();
+  }),
+);
+showSignsToggle?.addEventListener('change', () => {
+  subStyle.showSigns = showSignsToggle.checked;
   saveSubStyle();
 });
 dubVoiceSelect.addEventListener('change', () => {

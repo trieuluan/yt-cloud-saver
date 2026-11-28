@@ -209,6 +209,66 @@
         </div>
 
         <div class="card ai-card">
+          <div class="sub-box" style="background:transparent;border:0;padding:0;">
+            <div>
+              <div id="ocrCardTitle" class="sub-title">Hardsub &amp; Sign Video OCR</div>
+              <div class="preview-text" style="margin-top:2px;">
+                Đọc trực tiếp chữ gắn cứng &amp; bảng tên nhân vật trên video, kết hợp WeSpeaker gán giọng Nam/Nữ.
+              </div>
+            </div>
+            <span id="ocrEngineBadge" class="tool-ok" style="font-size:11px;white-space:nowrap;">Built-in · 0 MB</span>
+          </div>
+
+          <div class="seg-tabs" style="margin:0;grid-template-columns:repeat(3,1fr);">
+            <button id="ocrModeAutoBtn" class="seg-btn active" type="button">✨ Auto (OCR → Whisper)</button>
+            <button id="ocrModeOnlyBtn" class="seg-btn" type="button">👁 Chỉ Video OCR</button>
+            <button id="ocrModeOffBtn" class="seg-btn" type="button">🎙 Tắt (Chỉ Whisper)</button>
+          </div>
+
+          <div id="ocrModeHint" class="preview-text" style="margin-top:0;">
+            Quét thăm dò ~2s đầu: nếu có Hardsub sẽ chạy Video OCR + WeSpeaker; nếu không có chữ trên hình sẽ tự chuyển sang Whisper STT.
+          </div>
+
+          <div id="ppocrInstallBox" class="sub-box hidden">
+            <div>
+              <div class="sub-title">PP-OCRv4 ONNX Engine (Win / Linux)</div>
+              <div id="ppocrModelStatus" class="muted">Optional (~15.2 MB · 0 Python)</div>
+            </div>
+            <div class="btn-group">
+              <button id="ppocrDlBtn" class="btn-primary btn-xs" type="button">Download</button>
+              <button id="ppocrRmBtn" class="btn-danger-ghost btn-xs hidden" type="button">Remove</button>
+            </div>
+          </div>
+
+          <div id="ocrSubOpts" class="sub-box-col">
+            <div class="quality-row">
+              <span class="sub-title">Vùng quét Hardsub đáy (ROI)</span>
+              <select id="ocrRegionSelect">
+                <option value="auto">Tự động (16:9 &amp; Shorts 9:16)</option>
+                <option value="bottom">Đáy tiêu chuẩn (16:9 · 24%)</option>
+                <option value="shorts">Phim dọc / Shorts (9:16 · 38%)</option>
+              </select>
+            </div>
+            <label class="toggle-row" style="margin:0;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div class="sub-title">🏷 Dịch cả Bảng tên nhân vật &amp; Chữ màn hình (1fps)</div>
+                <div class="muted" style="font-size:11px;">Đè thẻ dịch đúng màu/tọa độ gốc &amp; tự nạp tên riêng vào Glossary</div>
+              </div>
+              <input id="ocrSignsInput" type="checkbox" checked />
+            </label>
+            <label class="toggle-row" style="margin:0;">
+              <span class="muted">Whisper chép bù đoạn thoại thiếu hardsub (&gt;8s)</span>
+              <input id="ocrGapFillInput" type="checkbox" checked />
+            </label>
+            <label class="toggle-row" style="margin:0;">
+              <span class="muted">Ưu tiên Hardsub OCR hơn YouTube Auto-Captions</span>
+              <input id="preferOcrInput" type="checkbox" checked />
+            </label>
+          </div>
+          <p id="ocrMsg" class="error-text hidden"></p>
+        </div>
+
+        <div class="card ai-card">
           <label class="toggle-row">
             <span>Speech-to-Text (Whisper · Local / Cloud)</span>
             <input id="whisperFallbackInput" type="checkbox" checked />

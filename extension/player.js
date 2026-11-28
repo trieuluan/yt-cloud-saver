@@ -59,6 +59,8 @@
     dubVoice: 'vi-VN-HoaiMyNeural',
     dubSpeed: 1.0,
     dubVolume: 0.15,
+    hardsubCover: 'blur',
+    showSigns: true,
   };
 
   chrome.storage.local.get({ subStyle }, (res) => {
@@ -70,7 +72,9 @@
       subStyle = { ...subStyle, ...changes.subStyle.newValue };
       if (subMode !== 'off' && prevDefault !== subStyle.defaultMode) {
         subMode = subStyle.defaultMode;
+        subCycleStartMode = subStyle.defaultMode;
         updateButtons();
+        if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       }
       if (dubEnabled && savedVolume !== null) {
         videoEl.volume = Math.min(savedVolume, Number(subStyle.dubVolume ?? 0.15));
@@ -86,11 +90,26 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  let translateInFlight = null;
+  let activeTranslatePct = null;
+
   function updateButtons() {
+    const pctSuffix = activeTranslatePct !== null ? ` (${activeTranslatePct}%)` : '';
     subBtn.dataset.state =
-      subMode === 'bilingual' ? 'active' : subMode === 'translated' ? 'translated' : 'idle';
-    subBtn.querySelector('.txt').textContent =
-      subMode === 'bilingual' ? 'AI CC: Bilingual' : subMode === 'translated' ? 'AI CC: Translated' : 'AI CC: OFF';
+      subMode === 'bilingual'
+        ? 'active'
+        : subMode === 'translated'
+          ? 'translated'
+          : activeTranslatePct !== null
+            ? 'active'
+            : 'idle';
+    const baseLabel =
+      subMode === 'bilingual'
+        ? 'AI CC: Bilingual'
+        : subMode === 'translated'
+          ? 'AI CC: Translated'
+          : 'AI CC: OFF';
+    subBtn.querySelector('.txt').textContent = baseLabel + pctSuffix;
 
     dubBtn.dataset.state = dubEnabled ? 'done' : 'idle';
     dubBtn.querySelector('.txt').textContent = dubEnabled ? 'Dub: ON' : 'Dub: OFF';
@@ -373,26 +392,106 @@
     }
   }
 
+  let lastSignRenderKey = '';
+
+  function escapeHtmlSafe(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderCloudPlayerSigns(nowMs) {
+    let signLayer = document.getElementById('cloudSignOverlay');
+    if (subMode === 'off' || subStyle.showSigns === false || !subBundle?.signs?.length) {
+      if (signLayer) signLayer.innerHTML = '';
+      lastSignRenderKey = '';
+      return;
+    }
+    if (!signLayer) {
+      signLayer = document.createElement('div');
+      signLayer.id = 'cloudSignOverlay';
+      Object.assign(signLayer.style, {
+        position: 'absolute',
+        pointerEvents: 'none',
+        zIndex: '18',
+        overflow: 'hidden',
+      });
+      playerWrap.appendChild(signLayer);
+    }
+    const pr = playerWrap.getBoundingClientRect();
+    const vw = videoEl.videoWidth || pr.width || 640;
+    const vh = videoEl.videoHeight || pr.height || 360;
+    const vidAspect = vw / vh;
+    const boxAspect = (pr.width || 640) / (pr.height || 360);
+    let rw = pr.width;
+    let rh = pr.height;
+    if (boxAspect > vidAspect + 0.01) rw = pr.height * vidAspect;
+    else if (boxAspect < vidAspect - 0.01) rh = pr.width / vidAspect;
+    const left = (pr.width - rw) * 0.5;
+    const top = (pr.height - rh) * 0.5;
+    signLayer.style.left = `${Math.round(left)}px`;
+    signLayer.style.top = `${Math.round(top)}px`;
+    signLayer.style.width = `${Math.round(rw)}px`;
+    signLayer.style.height = `${Math.round(rh)}px`;
+
+    const active = subBundle.signs.filter(
+      (s) => s.translated && nowMs >= s.startMs && nowMs <= s.endMs,
+    );
+    const key = `${Math.round(rh)}|${active.map((s) => `${s.startMs}:${s.translated}`).join('||')}`;
+    if (key === lastSignRenderKey) return;
+    lastSignRenderKey = key;
+    if (!active.length) {
+      signLayer.innerHTML = '';
+      return;
+    }
+    signLayer.innerHTML = active
+      .map((s) => {
+        const fg = s.fgHex || '#FFFFFF';
+        const bg = hexToRgba(s.bgHex || '#111827', s.solidPlate ? 0.94 : 0.80);
+        const fontFam =
+          s.fontStyle === 'serif'
+            ? "Georgia, 'Noto Serif', serif"
+            : "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        const pxH = Math.max(18, (s.hPct / 100) * rh);
+        const fontPx = Math.max(11, Math.min(24, Math.round(pxH * 0.40)));
+        return `<div style="position:absolute;left:${Math.max(0.5, s.xPct - 0.5).toFixed(2)}%;top:${Math.max(0.5, s.yPct - 0.4).toFixed(2)}%;min-width:${(s.wPct + 1).toFixed(2)}%;min-height:${(s.hPct + 0.8).toFixed(2)}%;max-width:68%;background:${bg};backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);color:${fg};font-family:${fontFam};padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.16);font-weight:700;font-size:${fontPx}px;display:flex;align-items:center;justify-content:center;text-align:center;">${escapeHtmlSafe(s.translated)}</div>`;
+      })
+      .join('');
+  }
+
   function tickSubtitles() {
-    if (subBundle?.cues?.length && (subMode !== 'off' || dubEnabled)) {
+    if ((subBundle?.cues?.length || subBundle?.signs?.length) && (subMode !== 'off' || dubEnabled)) {
       const nowMs = videoEl.currentTime * 1000;
-      const idx = subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs);
+      const idx = subBundle.cues ? subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs) : -1;
       const cue = idx >= 0 ? subBundle.cues[idx] : null;
+
+      renderCloudPlayerSigns(nowMs);
 
       if (subMode !== 'off') {
         if (!cue) {
           subOverlay.innerHTML = '';
         } else {
+          const coverMode = subStyle.hardsubCover || 'blur';
+          const hasHardsub = Boolean(subBundle?.hardsubBox) && coverMode !== 'off';
           const a = Number(subStyle.bgOpacity ?? 80) / 100;
-          const trBg = hexToRgba(subStyle.bgColor, a.toFixed(2));
-          const origBg = hexToRgba(subStyle.bgColor, (a * 0.85).toFixed(2));
+          const trAlpha = coverMode === 'solid' && hasHardsub ? 0.96 : hasHardsub ? Math.max(a, 0.78) : a;
+          const trBg = hexToRgba(subStyle.bgColor, trAlpha.toFixed(2));
+          const origBg = hexToRgba(subStyle.bgColor, (trAlpha * 0.86).toFixed(2));
+          const blurCss =
+            coverMode === 'blur' && hasHardsub
+              ? 'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);min-width:52%;'
+              : coverMode === 'solid' && hasHardsub
+                ? 'min-width:56%;'
+                : '';
           const trSize = Number(subStyle.fontSize || 18);
           const origSize = Math.max(11, Math.round(trSize * 0.78));
           const origHtml =
             subMode === 'bilingual'
-              ? `<div style="background:${origBg};color:#e2e8f0;padding:3px 10px;border-radius:6px;font-size:${origSize}px;line-height:1.35;">${cue.original.replace(/</g, '&lt;')}</div>`
+              ? `<div style="background:${origBg};${blurCss}color:#e2e8f0;padding:3px 12px;border-radius:6px;font-size:${origSize}px;line-height:1.35;">${escapeHtmlSafe(cue.original)}</div>`
               : '';
-          const trHtml = `<div style="background:${trBg};color:${subStyle.textColor || '#ffffff'};padding:5px 12px;border-radius:8px;font-size:${trSize}px;font-weight:600;line-height:1.35;text-shadow:0 1px 3px #000;">${cue.translated.replace(/</g, '&lt;')}</div>`;
+          const trHtml = `<div style="background:${trBg};${blurCss}color:${subStyle.textColor || '#ffffff'};padding:6px 16px;border-radius:8px;font-size:${trSize}px;font-weight:600;line-height:1.35;text-shadow:0 1px 3px #000;">${escapeHtmlSafe(cue.translated)}</div>`;
           subOverlay.innerHTML = origHtml + trHtml;
         }
       }
@@ -416,55 +515,89 @@
   }
 
   async function ensureSubtitlesLoaded() {
-    if (subBundle?.cues?.length) return subBundle;
-    try {
-      const cached = await sendBg('GET_SUBTITLES', { videoId });
-      if (cached?.cues?.length) {
-        subBundle = cached;
-        return subBundle;
-      }
-    } catch {}
-    subBtn.querySelector('.txt').textContent = 'Translating...';
-    subBtn.dataset.state = 'active';
-    const res = await sendBg('TRANSLATE_VIDEO', {
-      payload: {
-        url: `https://www.youtube.com/watch?v=${videoId}`,
-        videoId,
-        title: `Cloud Video ${videoId}`,
-      },
-    });
-    if (res?.cached && res?.bundle) {
-      subBundle = res.bundle;
+    if (subBundle && (subBundle.cues?.length || subBundle.signs?.length) && !subBundle.partial) {
       return subBundle;
     }
-    if (res?.job) {
-      while (true) {
-        await new Promise((r) => setTimeout(r, 1500));
-        const { job } = await sendBg('GET_JOB', { id: res.job.id });
-        if (!job) throw new Error('Translation job disappeared');
-        subBtn.querySelector('.txt').textContent = `AI CC: ${job.progress || 0}%`;
-        if (job.status === 'done') {
-          subBundle = await sendBg('GET_SUBTITLES', { videoId });
+    if (translateInFlight) return translateInFlight;
+
+    translateInFlight = (async () => {
+      try {
+        const cached = await sendBg('GET_SUBTITLES', { videoId });
+        if (cached && (cached.cues?.length || cached.signs?.length) && !cached.partial) {
+          subBundle = cached;
           return subBundle;
         }
-        if (job.status === 'error' || job.status === 'cancelled') {
-          throw new Error(job.error || 'Translation failed');
+      } catch {}
+
+      activeTranslatePct = 0;
+      updateButtons();
+      try {
+        const res = await sendBg('TRANSLATE_VIDEO', {
+          payload: {
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            videoId,
+            title: `Cloud Video ${videoId}`,
+          },
+        });
+        if (res?.cached && res?.bundle) {
+          subBundle = res.bundle;
+          return subBundle;
         }
+        if (res?.job) {
+          activeTranslatePct = res.job.progress || 5;
+          updateButtons();
+          while (true) {
+            await new Promise((r) => setTimeout(r, 1500));
+            const { job } = await sendBg('GET_JOB', { id: res.job.id });
+            if (!job) throw new Error('Translation job disappeared');
+            if (job.progress >= 15 || job.status === 'done') {
+              try {
+                const partial = await sendBg('GET_SUBTITLES', { videoId });
+                if (partial && (partial.cues?.length || partial.signs?.length)) {
+                  subBundle = partial;
+                  if ((subMode !== 'off' || dubEnabled) && !syncRaf) {
+                    syncRaf = requestAnimationFrame(tickSubtitles);
+                  }
+                }
+              } catch {}
+            }
+            if (job.status === 'done') {
+              subBundle = await sendBg('GET_SUBTITLES', { videoId }).catch(() => subBundle);
+              return subBundle;
+            }
+            if (job.status === 'error' || job.status === 'cancelled') {
+              throw new Error(job.error || 'Translation failed');
+            }
+            activeTranslatePct = job.progress || 0;
+            updateButtons();
+          }
+        }
+        throw new Error('No subtitles available');
+      } finally {
+        translateInFlight = null;
+        activeTranslatePct = null;
+        updateButtons();
       }
-    }
-    throw new Error('No subtitles available');
+    })();
+
+    return translateInFlight;
   }
 
   let subCycleStartMode = null;
   subBtn.addEventListener('click', async () => {
     if (subMode === 'off') {
+      subCycleStartMode = subStyle.defaultMode || 'bilingual';
+      subMode = subCycleStartMode;
+      updateButtons();
+      if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       try {
         await ensureSubtitlesLoaded();
-        subCycleStartMode = subStyle.defaultMode || 'bilingual';
-        subMode = subCycleStartMode;
-        updateButtons();
-        if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
+        if (subMode !== 'off' && !syncRaf) {
+          syncRaf = requestAnimationFrame(tickSubtitles);
+        }
       } catch (err) {
+        subMode = 'off';
+        subCycleStartMode = null;
         subBtn.dataset.state = 'error';
         subBtn.title = err.message;
         subBtn.querySelector('.txt').textContent = 'AI CC: Error';
@@ -477,11 +610,16 @@
         subStyle = { ...subStyle, defaultMode: subMode };
         chrome.storage.local.set({ subStyle });
       }
-    } else {
-      subMode = 'off';
-      subCycleStartMode = null;
-      subOverlay.innerHTML = '';
+      updateButtons();
+      if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
+      return;
     }
+    subMode = 'off';
+    subCycleStartMode = null;
+    subOverlay.innerHTML = '';
+    const cloudSigns = document.getElementById('cloudSignOverlay');
+    if (cloudSigns) cloudSigns.innerHTML = '';
+    lastSignRenderKey = '';
     updateButtons();
   });
 

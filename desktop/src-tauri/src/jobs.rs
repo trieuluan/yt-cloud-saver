@@ -499,11 +499,21 @@ impl JobManager {
 
             match res {
                 Ok(bundle) => {
+                    let done_stage = if bundle.signs.is_empty() {
+                        format!("Translated {} lines ({})", bundle.cues.len(), bundle.source)
+                    } else {
+                        format!(
+                            "Translated {} lines + {} signs ({})",
+                            bundle.cues.len(),
+                            bundle.signs.len(),
+                            bundle.source
+                        )
+                    };
                     mgr.update_job(
                         &job_id,
                         Some("done"),
                         Some(100),
-                        Some(format!("Translated {} lines ({})", bundle.cues.len(), bundle.source)),
+                        Some(done_stage),
                         None,
                         None,
                     )

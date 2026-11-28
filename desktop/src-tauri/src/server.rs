@@ -59,9 +59,11 @@ pub fn is_valid_youtube_url(value: &str) -> bool {
 async fn health(State(st): State<ServerState>) -> impl IntoResponse {
     let (tools, remotes) = tokio::join!(check_tools(&st.bin_dir), list_remotes(&st.bin_dir));
     let config = load_config(&st.data_dir);
+    let ocr = crate::ocr::check_ocr_status(&st.data_dir);
     Json(json!({
         "ok": true,
         "tools": tools,
+        "ocr": ocr,
         "remotes": remotes,
         "config": config,
     }))

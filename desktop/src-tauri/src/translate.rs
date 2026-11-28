@@ -26,13 +26,19 @@ pub struct SubtitleBundle {
     #[serde(default)]
     pub title: String,
     pub target_lang: String,
-    pub source: String, // "youtube-cc" | "whisper"
+    pub source: String, // "youtube-cc" | "whisper" | "hardsub-ocr" | "hardsub-ocr+whisper"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardsub_box: Option<crate::ocr::HardsubBox>,
     #[serde(default)]
     pub partial: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub glossary: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scene_note: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signs: Vec<crate::ocr::SignCue>,
     pub cues: Vec<SubtitleCue>,
 }
 
@@ -44,7 +50,10 @@ pub struct SubtitleSummary {
     pub title: String,
     pub target_lang: String,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_engine: Option<String>,
     pub line_count: usize,
+    pub sign_count: usize,
 }
 
 fn cache_path(data_dir: &Path, video_id: &str, target_lang: &str) -> PathBuf {
@@ -61,10 +70,37 @@ fn raw_cache_path(data_dir: &Path, video_id: &str) -> PathBuf {
     data_dir.join("subtitles").join(format!("{video_id}_raw.json"))
 }
 
+fn source_override_path(data_dir: &Path, video_id: &str) -> PathBuf {
+    data_dir
+        .join("subtitles")
+        .join(format!("{video_id}_override.txt"))
+}
+
+fn write_source_override(data_dir: &Path, video_id: &str, mode: &str) {
+    let p = source_override_path(data_dir, video_id);
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(p, mode);
+}
+
+fn take_source_override(data_dir: &Path, video_id: &str) -> Option<String> {
+    let p = source_override_path(data_dir, video_id);
+    let val = fs::read_to_string(&p).ok().map(|s| s.trim().to_string());
+    let _ = fs::remove_file(&p);
+    val.filter(|s| !s.is_empty())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawCuesCache {
     source: String,
+    #[serde(default)]
+    ocr_engine: Option<String>,
+    #[serde(default)]
+    hardsub_box: Option<crate::ocr::HardsubBox>,
+    #[serde(default)]
+    signs: Vec<crate::ocr::SignCue>,
     #[serde(default)]
     partial: bool,
     #[serde(default)]
@@ -79,10 +115,14 @@ fn load_raw_cache(data_dir: &Path, video_id: &str) -> Option<RawCuesCache> {
     serde_json::from_str(&raw).ok()
 }
 
-fn save_raw_cache(
+#[allow(clippy::too_many_arguments)]
+fn save_raw_cache_ext(
     data_dir: &Path,
     video_id: &str,
     source: &str,
+    ocr_engine: Option<String>,
+    hardsub_box: Option<crate::ocr::HardsubBox>,
+    signs: &[crate::ocr::SignCue],
     cues: &[SubtitleCue],
     partial: bool,
     completed_chunks: usize,
@@ -94,6 +134,9 @@ fn save_raw_cache(
     }
     let cache = RawCuesCache {
         source: source.to_string(),
+        ocr_engine,
+        hardsub_box,
+        signs: signs.to_vec(),
         partial,
         completed_chunks,
         total_chunks,
@@ -102,6 +145,29 @@ fn save_raw_cache(
     if let Ok(json) = serde_json::to_string_pretty(&cache) {
         let _ = fs::write(path, json);
     }
+}
+
+fn save_raw_cache(
+    data_dir: &Path,
+    video_id: &str,
+    source: &str,
+    cues: &[SubtitleCue],
+    partial: bool,
+    completed_chunks: usize,
+    total_chunks: usize,
+) {
+    save_raw_cache_ext(
+        data_dir,
+        video_id,
+        source,
+        None,
+        None,
+        &[],
+        cues,
+        partial,
+        completed_chunks,
+        total_chunks,
+    );
 }
 
 fn list_chunk_audio(tmp_dir: &Path, is_cloud: bool) -> Vec<PathBuf> {
@@ -807,13 +873,85 @@ async fn translate_cue_batches(
             },
             target_lang: latest_cfg.target_lang.clone(),
             source: "whisper".to_string(),
+            ocr_engine: None,
+            hardsub_box: None,
             partial: true,
             glossary: memory.to_glossary_map(),
             scene_note: memory.scene_note.clone(),
+            signs: Vec::new(),
             cues: translated_all.clone(),
         };
         save_cached_subtitles(data_dir, &partial_bundle);
     }
+    Ok(())
+}
+
+fn is_skipped_sign_translation(s: &str) -> bool {
+    let clean = s.trim();
+    clean.is_empty()
+        || clean.eq_ignore_ascii_case("[skip]")
+        || clean.eq_ignore_ascii_case("skip")
+        || clean == "-"
+}
+
+/// Translates on-screen signs/character nameplates BEFORE dialogue cues so discovered character
+/// names immediately populate `TranslationMemory.glossary`, while discarding background clutter.
+async fn translate_signs_and_enrich_glossary(
+    cfg: &AppConfig,
+    signs: &mut Vec<crate::ocr::SignCue>,
+    title: Option<&str>,
+    memory: &mut TranslationMemory,
+) -> Result<(), String> {
+    if signs.is_empty() {
+        return Ok(());
+    }
+    let title_ctx = title
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| format!(" for the video titled \"{}\"", t))
+        .unwrap_or_default();
+
+    for chunk in signs.chunks_mut(35) {
+        let items: Vec<IndexedSubtitleLine> = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, s)| IndexedSubtitleLine {
+                i,
+                t: s.original.clone(),
+            })
+            .collect();
+
+        let prompt = format!(
+            "Below are {} on-screen text items extracted via OCR from video frames{}.\nRules:\n1. Translate ONLY story-relevant on-screen text into concise, natural {}: character nameplates/introductions (e.g. \"傅寒深 · 傅氏集团总裁\" -> \"Phó Hàn Thâm · Chủ tịch Tập đoàn Phó Thị\"), time/location cards (e.g. \"三年后\"), episode titles, phone messages, contracts, or letters.\n2. If an item is meaningless background clutter (street shop logos, clothing brands, car license plates, channel watermarks, random UI numbers, or garbled OCR fragments), set its \"t\" to \"[SKIP]\" so it is hidden.\n3. Add every discovered character name, title, or company/clan name into \"glossary\" so spoken dialogue uses exact consistent names.\n4. Return ONLY JSON: {{\"lines\":[{{\"i\":0,\"t\":\"...\"}}],\"glossary\":{{\"source_name\":\"translated_name\"}}}}\n\n{}",
+            items.len(),
+            title_ctx,
+            cfg.target_lang,
+            serde_json::to_string(&items).unwrap_or_default()
+        );
+
+        let reply = call_llm(cfg, &prompt).await?;
+        let trimmed = reply.trim();
+        if let (Some(obj_start), Some(obj_end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+            let slice = &trimmed[obj_start..=obj_end];
+            if let Ok(parsed) = serde_json::from_str::<BatchTranslationObj>(slice) {
+                memory.merge(parsed.glossary, parsed.scene);
+                for it in parsed.lines {
+                    if it.i < chunk.len() {
+                        chunk[it.i].translated = it.t.trim().to_string();
+                    }
+                }
+            }
+        } else if let (Some(s), Some(e)) = (trimmed.find('['), trimmed.rfind(']')) {
+            if let Ok(parsed) = serde_json::from_str::<Vec<IndexedSubtitleLine>>(&trimmed[s..=e]) {
+                for it in parsed {
+                    if it.i < chunk.len() {
+                        chunk[it.i].translated = it.t.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    signs.retain(|s| !is_skipped_sign_translation(&s.translated));
     Ok(())
 }
 
@@ -1062,6 +1200,567 @@ async fn repair_whisper_chunk_cues(
     out
 }
 
+struct ExtractedRawBundle {
+    source: String,
+    ocr_engine: Option<String>,
+    hardsub_box: Option<crate::ocr::HardsubBox>,
+    cues: Vec<SubtitleCue>,
+    signs: Vec<crate::ocr::SignCue>,
+    memory: TranslationMemory,
+}
+
+async fn download_compressed_audio_for_ocr(
+    ytdlp: &Path,
+    ffmpeg: &Path,
+    bin_dir: &Path,
+    config: &AppConfig,
+    url: &str,
+    video_id: &str,
+    tmp_dir: &Path,
+) -> Option<PathBuf> {
+    let audio_raw = tmp_dir.join("ocr_audio_raw.m4a");
+    if audio_raw.is_file() {
+        return Some(audio_raw);
+    }
+    let mut dl_args = vec![
+        "--no-playlist".to_string(),
+        "-f".to_string(),
+        "ba[ext=m4a]/ba".to_string(),
+        "-o".to_string(),
+        audio_raw.to_string_lossy().to_string(),
+    ];
+    if !config.cookies_browser.is_empty() {
+        dl_args.push("--cookies-from-browser".to_string());
+        dl_args.push(config.cookies_browser.clone());
+    }
+    dl_args.push(url.to_string());
+
+    let dl_ok = Command::new(ytdlp)
+        .args(&dl_args)
+        .env("PATH", build_env_path(bin_dir))
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if dl_ok && audio_raw.is_file() {
+        return Some(audio_raw);
+    }
+    let _ = fs::remove_file(&audio_raw);
+
+    let stream_url = format!("http://127.0.0.1:{}/stream/{}", config.port, video_id);
+    let ok = Command::new(ffmpeg)
+        .args([
+            "-y",
+            "-i",
+            &stream_url,
+            "-vn",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k",
+            &audio_raw.to_string_lossy(),
+        ])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if ok && audio_raw.is_file() {
+        Some(audio_raw)
+    } else {
+        None
+    }
+}
+
+fn find_segment_speech_gaps(
+    cues: &[SubtitleCue],
+    seg_start_ms: u64,
+    seg_end_ms: u64,
+) -> Vec<(u64, u64)> {
+    const MIN_GAP_MS: u64 = 8_000;
+    let mut gaps = Vec::new();
+    let mut prev_end = seg_start_ms;
+    for c in cues {
+        if c.start_ms > prev_end + MIN_GAP_MS {
+            gaps.push((prev_end + 150, c.start_ms - 150));
+        }
+        prev_end = prev_end.max(c.end_ms);
+    }
+    if seg_end_ms > prev_end + MIN_GAP_MS {
+        gaps.push((prev_end + 150, (seg_end_ms - 150).min(prev_end + 35_000)));
+    }
+    gaps.truncate(2);
+    gaps
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn postprocess_ocr_segment_audio(
+    data_dir: &Path,
+    bin_dir: &Path,
+    config: &AppConfig,
+    ffmpeg: &Path,
+    audio_source: &Path,
+    tmp_dir: &Path,
+    seg_idx: usize,
+    seg_start_sec: f64,
+    seg_len_sec: f64,
+    seg_cues: &mut Vec<SubtitleCue>,
+    speaker_tracker: &mut crate::diarize::SpeakerTracker,
+    yamnet_session: &std::sync::Arc<std::sync::Mutex<Option<ort::session::Session>>>,
+) -> (Option<Vec<String>>, bool) {
+    let seg_offset_ms = (seg_start_sec * 1000.0).round() as u64;
+    let seg_end_ms = ((seg_start_sec + seg_len_sec) * 1000.0).round() as u64;
+    let want_diarize = config.use_speaker_diarization;
+    let gaps = if config.ocr_gap_fill_whisper && config.use_whisper_fallback {
+        find_segment_speech_gaps(seg_cues, seg_offset_ms, seg_end_ms)
+    } else {
+        Vec::new()
+    };
+
+    if (!want_diarize || seg_cues.is_empty()) && gaps.is_empty() {
+        return (None, false);
+    }
+
+    let seg_wav = tmp_dir.join(format!("ocr_seg_audio_{seg_idx:03}.wav"));
+    let ok = Command::new(ffmpeg)
+        .args([
+            "-y",
+            "-ss",
+            &format!("{seg_start_sec:.2}"),
+            "-t",
+            &format!("{seg_len_sec:.2}"),
+            "-i",
+            &audio_source.to_string_lossy(),
+            "-vn",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            &seg_wav.to_string_lossy(),
+        ])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !ok || !seg_wav.is_file() {
+        return (None, false);
+    }
+
+    let yamnet_scores = if crate::yamnet::is_yamnet_installed(data_dir)
+        || (want_diarize && crate::yamnet::ensure_yamnet_model(data_dir).await.is_ok())
+    {
+        let d_dir = data_dir.to_path_buf();
+        let w_path = seg_wav.clone();
+        let ys_arc = yamnet_session.clone();
+        tokio::task::spawn_blocking(move || -> Option<Vec<crate::yamnet::YamnetFrameScore>> {
+            let mut reader = hound::WavReader::open(&w_path).ok()?;
+            let pcm: Vec<f32> = reader
+                .samples::<i16>()
+                .filter_map(Result::ok)
+                .map(|s| s as f32 / 32768.0)
+                .collect();
+            let mut guard = ys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.is_none() {
+                *guard = crate::yamnet::load_yamnet_session(&d_dir).ok();
+            }
+            let sess = guard.as_mut()?;
+            crate::yamnet::analyze_pcm_gender_frames_with_session(sess, &pcm).ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+
+    let mut used_gap_fill = false;
+    if !gaps.is_empty() {
+        let is_cloud =
+            config.whisper_mode == "cloud" && !config.whisper_cloud_api_key.trim().is_empty();
+        let local_whisper =
+            find_binary("whisper-cli", bin_dir).or_else(|| find_binary("whisper", bin_dir));
+        let model_name = if config.whisper_model.is_empty() {
+            "small"
+        } else {
+            config.whisper_model.as_str()
+        };
+        let model_path = whisper_model_path(data_dir, model_name);
+        let can_whisper = is_cloud || (local_whisper.is_some() && model_path.is_file());
+
+        if can_whisper {
+            let whisper_lang = if config.whisper_language.trim().is_empty() {
+                "auto"
+            } else {
+                config.whisper_language.trim()
+            };
+            for (g_idx, (g_start, g_end)) in gaps.iter().enumerate() {
+                let rel_start_ms = g_start.saturating_sub(seg_offset_ms);
+                let rel_end_ms = g_end.saturating_sub(seg_offset_ms);
+                if let Some(ref scores) = yamnet_scores {
+                    let f_start = (rel_start_ms as usize) / 480;
+                    let f_end = ((rel_end_ms as usize) / 480).min(scores.len());
+                    if f_end > f_start {
+                        let speech_frames = scores[f_start..f_end]
+                            .iter()
+                            .filter(|s| (s.male + s.female) >= 0.22)
+                            .count();
+                        if speech_frames < 5 {
+                            continue;
+                        }
+                    }
+                }
+                let dur_sec = ((*g_end - *g_start) as f64) / 1000.0;
+                if dur_sec < 2.5 {
+                    continue;
+                }
+                let ext = if is_cloud { "mp3" } else { "wav" };
+                let slice_path = tmp_dir.join(format!("gap_{seg_idx:03}_{g_idx:02}.{ext}"));
+                let mut ff_args = vec![
+                    "-y".to_string(),
+                    "-ss".to_string(),
+                    format!("{:.2}", (rel_start_ms as f64) / 1000.0),
+                    "-t".to_string(),
+                    format!("{dur_sec:.2}"),
+                    "-i".to_string(),
+                    seg_wav.to_string_lossy().to_string(),
+                    "-ar".to_string(),
+                    "16000".to_string(),
+                    "-ac".to_string(),
+                    "1".to_string(),
+                ];
+                if is_cloud {
+                    ff_args.extend(["-b:a".to_string(), "48k".to_string()]);
+                }
+                ff_args.push(slice_path.to_string_lossy().to_string());
+                let slice_ok = Command::new(ffmpeg)
+                    .args(&ff_args)
+                    .output()
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if !slice_ok || !slice_path.is_file() {
+                    continue;
+                }
+
+                let mut gap_cues = if is_cloud {
+                    transcribe_chunk_cloud(config, &slice_path, whisper_lang, *g_start)
+                        .await
+                        .unwrap_or_default()
+                } else if let Some(ref wh_bin) = local_whisper {
+                    let out_pref = tmp_dir.join(format!("gap_out_{seg_idx:03}_{g_idx:02}"));
+                    let _ = Command::new(wh_bin)
+                        .args([
+                            "-m",
+                            &model_path.to_string_lossy(),
+                            "-l",
+                            whisper_lang,
+                            "-mc",
+                            "0",
+                            "-bs",
+                            "1",
+                            "-f",
+                            &slice_path.to_string_lossy(),
+                            "-osrt",
+                            "-of",
+                            &out_pref.to_string_lossy(),
+                        ])
+                        .env("PATH", build_env_path(bin_dir))
+                        .output()
+                        .await;
+                    let srt_file = tmp_dir.join(format!("gap_out_{seg_idx:03}_{g_idx:02}.srt"));
+                    let raw_srt = fs::read_to_string(&srt_file).unwrap_or_default();
+                    let _ = fs::remove_file(&srt_file);
+                    parse_vtt_or_srt(&raw_srt)
+                        .into_iter()
+                        .map(|mut c| {
+                            c.start_ms += *g_start;
+                            c.end_ms = (c.end_ms + *g_start).min(*g_end);
+                            c
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let _ = fs::remove_file(&slice_path);
+                cleanup_whisper_cues(&mut gap_cues);
+                if !gap_cues.is_empty() {
+                    used_gap_fill = true;
+                    seg_cues.extend(gap_cues);
+                }
+            }
+            if used_gap_fill {
+                seg_cues.sort_by_key(|c| c.start_ms);
+            }
+        }
+    }
+
+    let speaker_hints = if want_diarize
+        && !seg_cues.is_empty()
+        && crate::diarize::ensure_wespeaker_model(data_dir).await.is_ok()
+    {
+        match speaker_tracker.diarize_chunk_with_yamnet(
+            data_dir,
+            &seg_wav,
+            seg_offset_ms,
+            seg_cues,
+            yamnet_scores.as_deref(),
+        ) {
+            Ok(pairs) => {
+                let mut hints = Vec::with_capacity(pairs.len());
+                for (i, (hint, code)) in pairs.into_iter().enumerate() {
+                    if i < seg_cues.len() {
+                        seg_cues[i].speaker = code;
+                    }
+                    hints.push(hint);
+                }
+                Some(hints)
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let _ = fs::remove_file(&seg_wav);
+    (speaker_hints, used_gap_fill)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_progressive_ocr_and_translate<F>(
+    data_dir: &Path,
+    bin_dir: &Path,
+    config: &AppConfig,
+    ytdlp: &Path,
+    ffmpeg: &Path,
+    url: &str,
+    video_id: &str,
+    title: &str,
+    tmp_dir: &Path,
+    force_ocr: bool,
+    on_progress: &F,
+) -> Result<Option<ExtractedRawBundle>, String>
+where
+    F: Fn(u8, String),
+{
+    let Some(session) = crate::ocr::pipeline::prepare_video_ocr_session(
+        data_dir,
+        bin_dir,
+        config,
+        url,
+        video_id,
+        tmp_dir,
+        force_ocr,
+        on_progress,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let need_audio = config.use_speaker_diarization
+        || (config.ocr_gap_fill_whisper && config.use_whisper_fallback);
+    let audio_source = if need_audio {
+        on_progress(16, "Fetching compressed audio for WeSpeaker...".to_string());
+        download_compressed_audio_for_ocr(ytdlp, ffmpeg, bin_dir, config, url, video_id, tmp_dir)
+            .await
+    } else {
+        None
+    };
+
+    let total_segs = session.segments.len().max(1);
+    let engine_name = session.engine_name.clone();
+    let hardsub_box = Some(session.locked_roi.hardsub_box);
+    let mut speaker_tracker = crate::diarize::SpeakerTracker::new();
+    let yamnet_session: std::sync::Arc<std::sync::Mutex<Option<ort::session::Session>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let mut translated_all: Vec<SubtitleCue> = Vec::new();
+    let mut signs_all: Vec<crate::ocr::SignCue> = Vec::new();
+    let mut memory = TranslationMemory::default();
+    let mut any_gap_fill = false;
+    let title_opt = (!title.trim().is_empty()).then_some(title);
+    let safe_title = if title.trim().is_empty() {
+        video_id.to_string()
+    } else {
+        title.to_string()
+    };
+
+    for (seg_idx, &(seg_start_sec, seg_len_sec)) in session.segments.iter().enumerate() {
+        let scan_pct = 18 + (((seg_idx * 78) / total_segs) as u8).min(78);
+        on_progress(
+            scan_pct,
+            format!(
+                "Scanning Hardsub ({engine_name}) segment {}/{total_segs}...",
+                seg_idx + 1
+            ),
+        );
+
+        let (mut seg_cues, mut seg_signs) = crate::ocr::pipeline::scan_video_ocr_segment(
+            data_dir,
+            ffmpeg,
+            config,
+            &session,
+            tmp_dir,
+            seg_idx,
+            seg_start_sec,
+            seg_len_sec,
+        )
+        .await?;
+
+        // Seamlessly merge a subtitle cue that straddles the segment boundary
+        if let (Some(prev_last), Some(first_new)) = (translated_all.last_mut(), seg_cues.first()) {
+            if first_new.start_ms <= prev_last.end_ms + 350
+                && crate::ocr::pipeline::char_similarity(&prev_last.original, &first_new.original)
+                    >= 0.80
+            {
+                prev_last.end_ms = prev_last.end_ms.max(first_new.end_ms);
+                seg_cues.remove(0);
+            }
+        }
+
+        let latest_cfg = load_config(data_dir);
+        let (speaker_hints, seg_gap_used) = if let Some(ref aud_path) = audio_source {
+            postprocess_ocr_segment_audio(
+                data_dir,
+                bin_dir,
+                &latest_cfg,
+                ffmpeg,
+                aud_path,
+                tmp_dir,
+                seg_idx,
+                seg_start_sec,
+                seg_len_sec,
+                &mut seg_cues,
+                &mut speaker_tracker,
+                &yamnet_session,
+            )
+            .await
+        } else {
+            (None, false)
+        };
+        if seg_gap_used {
+            any_gap_fill = true;
+        }
+
+        let tr_pct = (scan_pct + (38 / (total_segs as u8).max(1)).max(2)).min(97);
+        on_progress(
+            tr_pct,
+            format!(
+                "Translating OCR segment {}/{total_segs} ({tr_pct}%)...",
+                seg_idx + 1
+            ),
+        );
+
+        if !seg_signs.is_empty() {
+            translate_signs_and_enrich_glossary(&latest_cfg, &mut seg_signs, title_opt, &mut memory)
+                .await?;
+            signs_all.extend(seg_signs);
+        }
+
+        let src_label = if any_gap_fill {
+            "hardsub-ocr+whisper"
+        } else {
+            "hardsub-ocr"
+        };
+
+        let seg_cues_len = seg_cues.len();
+        for (b_idx, batch) in seg_cues.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
+            let prev_context = build_prev_context(&translated_all, &memory);
+            let hint_slice = speaker_hints.as_deref().map(|all| {
+                let start = b_idx * TRANSLATE_BATCH_SIZE;
+                let end = (start + batch.len()).min(all.len());
+                &all[start.min(all.len())..end]
+            });
+            translate_batch_exact(
+                &latest_cfg,
+                batch,
+                &prev_context,
+                title_opt,
+                &mut memory,
+                hint_slice,
+            )
+            .await?;
+            for cue in batch.iter_mut() {
+                if cue.translated.is_empty() {
+                    cue.translated = cue.original.clone();
+                }
+                translated_all.push(cue.clone());
+            }
+
+            let is_final_seg_and_batch =
+                seg_idx + 1 >= total_segs && (b_idx + 1) * TRANSLATE_BATCH_SIZE >= seg_cues_len;
+            let partial_bundle = SubtitleBundle {
+                video_id: video_id.to_string(),
+                title: safe_title.clone(),
+                target_lang: latest_cfg.target_lang.clone(),
+                source: src_label.to_string(),
+                ocr_engine: Some(engine_name.clone()),
+                hardsub_box,
+                partial: !is_final_seg_and_batch,
+                glossary: memory.to_glossary_map(),
+                scene_note: memory.scene_note.clone(),
+                signs: signs_all.clone(),
+                cues: translated_all.clone(),
+            };
+            save_cached_subtitles(data_dir, &partial_bundle);
+        }
+
+        // Even if a segment had only signs and 0 dialogue cues, persist partial bundle
+        if seg_cues.is_empty() && !signs_all.is_empty() {
+            let partial_bundle = SubtitleBundle {
+                video_id: video_id.to_string(),
+                title: safe_title.clone(),
+                target_lang: latest_cfg.target_lang.clone(),
+                source: src_label.to_string(),
+                ocr_engine: Some(engine_name.clone()),
+                hardsub_box,
+                partial: seg_idx + 1 < total_segs,
+                glossary: memory.to_glossary_map(),
+                scene_note: memory.scene_note.clone(),
+                signs: signs_all.clone(),
+                cues: translated_all.clone(),
+            };
+            save_cached_subtitles(data_dir, &partial_bundle);
+        }
+
+        // Ensure progress jumps >= 22% right after Segment 0 so Extension immediately renders live!
+        let done_seg_pct = (22 + (((seg_idx + 1) * 75) / total_segs) as u8).min(98);
+        on_progress(
+            done_seg_pct,
+            format!(
+                "Live ready: segment {}/{total_segs} translated ({} lines)",
+                seg_idx + 1,
+                translated_all.len()
+            ),
+        );
+    }
+
+    let _ = fs::remove_dir_all(tmp_dir);
+
+    if translated_all.is_empty() && signs_all.is_empty() {
+        if !force_ocr && config.ocr_mode != "ocr_only" {
+            return Ok(None);
+        }
+        return Err("No Hardsub text could be extracted from this video.".to_string());
+    }
+
+    let final_src = if any_gap_fill {
+        "hardsub-ocr+whisper".to_string()
+    } else {
+        "hardsub-ocr".to_string()
+    };
+
+    Ok(Some(ExtractedRawBundle {
+        source: final_src,
+        ocr_engine: Some(engine_name),
+        hardsub_box,
+        cues: translated_all,
+        signs: signs_all,
+        memory,
+    }))
+}
+
 async fn extract_raw_cues<F>(
     data_dir: &Path,
     bin_dir: &Path,
@@ -1070,28 +1769,38 @@ async fn extract_raw_cues<F>(
     video_id: &str,
     title: &str,
     on_progress: &F,
-) -> Result<(String, Vec<SubtitleCue>, TranslationMemory), String>
+) -> Result<ExtractedRawBundle, String>
 where
     F: Fn(u8, String),
 {
     let ytdlp = find_binary("yt-dlp", bin_dir)
         .ok_or_else(|| "yt-dlp is not installed".to_string())?;
+    let force_source = take_source_override(data_dir, video_id);
     let tmp_dir = PathBuf::from(&config.temp_dir).join(format!("sub_{video_id}"));
-    let existing_raw = load_raw_cache(data_dir, video_id)
-        .filter(|r| r.partial && r.source == "whisper");
+    let existing_raw = if force_source.is_some() {
+        None
+    } else {
+        load_raw_cache(data_dir, video_id).filter(|r| r.partial && r.source == "whisper")
+    };
     if existing_raw.is_none() {
         let _ = fs::remove_dir_all(&tmp_dir);
     }
     fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
 
-    if existing_raw.is_none() {
+    let ocr_ready = crate::ocr::is_ocr_ready(data_dir);
+    let skip_auto_cc_for_ocr =
+        config.prefer_ocr_over_auto_cc && config.ocr_mode != "off" && ocr_ready;
+
+    if existing_raw.is_none() && force_source.is_none() {
         let out_tmpl = tmp_dir.join("sub").to_string_lossy().to_string();
         let mut args = vec![
             "--skip-download".to_string(),
             "--no-playlist".to_string(),
             "--write-subs".to_string(),
         ];
-        if !(config.prefer_whisper_over_auto_cc && config.use_whisper_fallback) {
+        if !((config.prefer_whisper_over_auto_cc && config.use_whisper_fallback)
+            || skip_auto_cc_for_ocr)
+        {
             args.push("--write-auto-subs".to_string());
         }
         args.extend([
@@ -1128,7 +1837,59 @@ where
             let cues = parse_vtt_or_srt(&raw);
             let _ = fs::remove_dir_all(&tmp_dir);
             if !cues.is_empty() {
-                return Ok(("youtube-cc".to_string(), cues, TranslationMemory::default()));
+                return Ok(ExtractedRawBundle {
+                    source: "youtube-cc".to_string(),
+                    ocr_engine: None,
+                    hardsub_box: None,
+                    cues,
+                    signs: Vec::new(),
+                    memory: TranslationMemory::default(),
+                });
+            }
+        }
+    }
+
+    // Hardsub & On-Screen Sign Video OCR branch (Apple Vision on macOS / PP-OCRv4 ONNX on Win & Linux)
+    let force_ocr = force_source.as_deref() == Some("ocr");
+    let force_whisper = force_source.as_deref() == Some("whisper");
+    let should_try_ocr = existing_raw.is_none()
+        && !force_whisper
+        && (force_ocr
+            || (config.ocr_mode != "off" && (config.ocr_mode == "ocr_only" || ocr_ready)));
+
+    if should_try_ocr {
+        let ffmpeg_for_ocr = find_binary("ffmpeg", bin_dir)
+            .ok_or_else(|| "ffmpeg is required for Hardsub Video OCR".to_string())?;
+        match run_progressive_ocr_and_translate(
+            data_dir,
+            bin_dir,
+            config,
+            &ytdlp,
+            &ffmpeg_for_ocr,
+            url,
+            video_id,
+            title,
+            &tmp_dir,
+            force_ocr,
+            on_progress,
+        )
+        .await
+        {
+            Ok(Some(bundle_out)) => {
+                return Ok(bundle_out);
+            }
+            Ok(None) => {
+                // Auto mode found no hardsub -> proceed cleanly to Whisper fallback below
+            }
+            Err(err) => {
+                if force_ocr || config.ocr_mode == "ocr_only" || !config.use_whisper_fallback {
+                    let _ = fs::remove_dir_all(&tmp_dir);
+                    return Err(err);
+                }
+                on_progress(
+                    18,
+                    format!("OCR skipped ({err}), falling back to Whisper STT..."),
+                );
             }
         }
     }
@@ -1614,7 +2375,14 @@ where
     if raw_all.is_empty() {
         return Err("Whisper produced empty subtitles".to_string());
     }
-    Ok(("whisper".to_string(), translated_all, memory))
+    Ok(ExtractedRawBundle {
+        source: "whisper".to_string(),
+        ocr_engine: None,
+        hardsub_box: None,
+        cues: translated_all,
+        signs: Vec::new(),
+        memory,
+    })
 }
 
 async fn call_llm(config: &AppConfig, prompt: &str) -> Result<String, String> {
@@ -1892,42 +2660,77 @@ where
     bak_os.push(".bak");
     let bak_path = PathBuf::from(bak_os);
 
-    let (source, mut cues, mut extracted_memory) = match load_raw_cache(data_dir, video_id) {
-        Some(raw) if !raw.partial => {
-            on_progress(50, "Loaded cached transcription, resuming translation...".to_string());
-            (raw.source, raw.cues, TranslationMemory::default())
-        }
-        _ => {
-            on_progress(5, "Checking YouTube captions...".to_string());
-            match extract_raw_cues(data_dir, bin_dir, config, url, video_id, title, &on_progress).await {
-                Ok((src, extracted, mem)) => {
-                    let _ = fs::remove_file(&bak_path);
-                    save_raw_cache(data_dir, video_id, &src, &extracted, false, 0, 0);
-                    (src, extracted, mem)
-                }
-                Err(err) => {
-                    if !target_cache.is_file() && bak_path.is_file() {
-                        let _ = fs::rename(&bak_path, &target_cache);
+    let (source, ocr_engine, hardsub_box, mut cues, mut signs, mut extracted_memory) =
+        match load_raw_cache(data_dir, video_id) {
+            Some(raw) if !raw.partial => {
+                on_progress(
+                    50,
+                    "Loaded cached transcription, resuming translation...".to_string(),
+                );
+                (
+                    raw.source,
+                    raw.ocr_engine,
+                    raw.hardsub_box,
+                    raw.cues,
+                    raw.signs,
+                    TranslationMemory::default(),
+                )
+            }
+            _ => {
+                on_progress(5, "Checking subtitles & video frames...".to_string());
+                match extract_raw_cues(data_dir, bin_dir, config, url, video_id, title, &on_progress)
+                    .await
+                {
+                    Ok(ext) => {
+                        let _ = fs::remove_file(&bak_path);
+                        save_raw_cache_ext(
+                            data_dir,
+                            video_id,
+                            &ext.source,
+                            ext.ocr_engine.clone(),
+                            ext.hardsub_box.clone(),
+                            &ext.signs,
+                            &ext.cues,
+                            false,
+                            0,
+                            0,
+                        );
+                        (
+                            ext.source,
+                            ext.ocr_engine,
+                            ext.hardsub_box,
+                            ext.cues,
+                            ext.signs,
+                            ext.memory,
+                        )
                     }
-                    return Err(err);
+                    Err(err) => {
+                        if !target_cache.is_file() && bak_path.is_file() {
+                            let _ = fs::rename(&bak_path, &target_cache);
+                        }
+                        return Err(err);
+                    }
                 }
             }
-        }
-    };
+        };
     let _ = fs::remove_file(&bak_path);
 
     // If extract_raw_cues already translated each chunk progressively, skip re-translating already translated cues
     let latest_cfg = load_config(data_dir);
-    let already_done = cues.iter().all(|c| !c.translated.is_empty());
-    if already_done && !cues.is_empty() {
+    let already_done = cues.iter().all(|c| !c.translated.is_empty())
+        && signs.iter().all(|s| !s.translated.is_empty());
+    if already_done && (!cues.is_empty() || !signs.is_empty()) {
         let bundle = SubtitleBundle {
             video_id: video_id.to_string(),
             title: title.to_string(),
             target_lang: latest_cfg.target_lang.clone(),
             source,
+            ocr_engine,
+            hardsub_box,
             partial: false,
             glossary: extracted_memory.to_glossary_map(),
             scene_note: extracted_memory.scene_note.clone(),
+            signs,
             cues,
         };
         save_cached_subtitles(data_dir, &bundle);
@@ -1939,16 +2742,30 @@ where
         .filter(|b| b.partial && b.cues.len() < cues.len());
     if let Some(ref b) = existing_partial {
         extracted_memory = TranslationMemory::from_bundle(b);
+        if !b.signs.is_empty() {
+            signs = b.signs.clone();
+        }
     }
     let mut translated_all: Vec<SubtitleCue> = existing_partial
         .map(|b| b.cues)
         .unwrap_or_default();
 
-    let resume_from = translated_all.len();
+    let mut memory = extracted_memory;
+
+    // Translate on-screen signs & character nameplates FIRST so Glossary has exact character names
+    if signs.iter().any(|s| s.translated.is_empty()) {
+        on_progress(
+            53,
+            format!("Translating {} on-screen signs & character names...", signs.len()),
+        );
+        translate_signs_and_enrich_glossary(&latest_cfg, &mut signs, Some(title), &mut memory)
+            .await?;
+    }
+
+    let resume_from = translated_all.len().min(cues.len());
     let total_cues = cues.len().max(1);
     let remaining = &mut cues[resume_from..];
     let total_batches = remaining.len().div_ceil(TRANSLATE_BATCH_SIZE).max(1);
-    let mut memory = extracted_memory;
 
     for (b_idx, chunk) in remaining.chunks_mut(TRANSLATE_BATCH_SIZE).enumerate() {
         let done_cues = resume_from + b_idx * TRANSLATE_BATCH_SIZE;
@@ -1973,9 +2790,12 @@ where
             title: title.to_string(),
             target_lang: latest_cfg.target_lang.clone(),
             source: source.clone(),
+            ocr_engine: ocr_engine.clone(),
+            hardsub_box: hardsub_box.clone(),
             partial: !is_last,
             glossary: memory.to_glossary_map(),
             scene_note: memory.scene_note.clone(),
+            signs: signs.clone(),
             cues: translated_all.clone(),
         };
         save_cached_subtitles(data_dir, &partial_bundle);
@@ -1986,9 +2806,12 @@ where
         title: title.to_string(),
         target_lang: latest_cfg.target_lang.clone(),
         source,
+        ocr_engine,
+        hardsub_box,
         partial: false,
         glossary: memory.to_glossary_map(),
         scene_note: memory.scene_note,
+        signs,
         cues: translated_all,
     };
     save_cached_subtitles(data_dir, &bundle);
@@ -2030,7 +2853,9 @@ pub fn list_cached_subtitles(data_dir: &Path) -> Vec<SubtitleSummary> {
             video_id: bundle.video_id,
             target_lang: bundle.target_lang,
             source: bundle.source,
+            ocr_engine: bundle.ocr_engine,
             line_count: bundle.cues.len(),
+            sign_count: bundle.signs.len(),
         });
     }
     out.sort_by(|a, b| a.title.cmp(&b.title));
@@ -2072,8 +2897,27 @@ pub fn prepare_retranslate_from_cache(
     if bundle.source == "whisper" {
         cleanup_whisper_cues(&mut raw_cues);
     }
-    if !raw_cues.is_empty() {
-        save_raw_cache(data_dir, &bundle.video_id, &bundle.source, &raw_cues, false, 0, 0);
+    let raw_signs: Vec<crate::ocr::SignCue> = bundle
+        .signs
+        .into_iter()
+        .map(|mut s| {
+            s.translated.clear();
+            s
+        })
+        .collect();
+    if !raw_cues.is_empty() || !raw_signs.is_empty() {
+        save_raw_cache_ext(
+            data_dir,
+            &bundle.video_id,
+            &bundle.source,
+            bundle.ocr_engine,
+            bundle.hardsub_box,
+            &raw_signs,
+            &raw_cues,
+            false,
+            0,
+            0,
+        );
     }
     let _ = fs::remove_file(&path);
     Ok((bundle.video_id, bundle.title))
@@ -2095,6 +2939,27 @@ pub fn prepare_rewhisper_from_cache(
     let _ = fs::remove_file(&bak_path);
     fs::rename(&path, &bak_path).map_err(|e| e.to_string())?;
     let _ = fs::remove_file(raw_cache_path(data_dir, &bundle.video_id));
+    write_source_override(data_dir, &bundle.video_id, "whisper");
+    Ok((bundle.video_id, bundle.title))
+}
+
+pub fn prepare_reocr_from_cache(
+    data_dir: &Path,
+    file_name: &str,
+) -> Result<(String, String), String> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid file name".to_string());
+    }
+    let path = data_dir.join("subtitles").join(file_name);
+    let raw = fs::read_to_string(&path).map_err(|e| format!("Subtitle cache not found: {e}"))?;
+    let bundle: SubtitleBundle = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let mut bak_os = path.as_os_str().to_os_string();
+    bak_os.push(".bak");
+    let bak_path = PathBuf::from(bak_os);
+    let _ = fs::remove_file(&bak_path);
+    fs::rename(&path, &bak_path).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(raw_cache_path(data_dir, &bundle.video_id));
+    write_source_override(data_dir, &bundle.video_id, "ocr");
     Ok((bundle.video_id, bundle.title))
 }
 
@@ -2225,9 +3090,12 @@ pub fn write_srt_file(bundle: &SubtitleBundle, dest: &Path) -> Result<(), String
         title: bundle.title.clone(),
         target_lang: bundle.target_lang.clone(),
         source: bundle.source.clone(),
+        ocr_engine: bundle.ocr_engine.clone(),
+        hardsub_box: bundle.hardsub_box,
         partial: bundle.partial,
         glossary: BTreeMap::new(),
         scene_note: String::new(),
+        signs: Vec::new(),
         cues: normalize_cues_for_mov_text(&bundle.cues),
     };
     write_srt_file_with_mode(&normalized, dest, "translated")
@@ -2391,16 +3259,39 @@ mod tests {
             video_id: "vid1".to_string(),
             title: "Title".to_string(),
             target_lang: "Vietnamese".to_string(),
-            source: "whisper".to_string(),
+            source: "hardsub-ocr".to_string(),
+            ocr_engine: Some("apple-vision".to_string()),
+            hardsub_box: Some(crate::ocr::HardsubBox {
+                bottom_pct: 7.5,
+                height_pct: 11.0,
+            }),
             partial: true,
             glossary: mem.to_glossary_map(),
             scene_note: mem.scene_note.clone(),
+            signs: vec![crate::ocr::SignCue {
+                start_ms: 1500,
+                end_ms: 4500,
+                original: "傅寒深 · 总裁".to_string(),
+                translated: "Phó Hàn Thâm · Tổng giám đốc".to_string(),
+                x_pct: 52.0,
+                y_pct: 34.0,
+                w_pct: 22.0,
+                h_pct: 8.5,
+                fg_hex: "#F6D365".to_string(),
+                bg_hex: "#131C2E".to_string(),
+                solid_plate: true,
+                font_style: "serif".to_string(),
+            }],
             cues: vec![],
         };
         let raw_json = serde_json::to_string(&bundle).unwrap();
         let decoded: SubtitleBundle = serde_json::from_str(&raw_json).unwrap();
         let restored = TranslationMemory::from_bundle(&decoded);
         assert_eq!(restored.glossary.len(), 2);
+        assert_eq!(decoded.signs.len(), 1);
+        assert_eq!(decoded.hardsub_box.unwrap().bottom_pct, 7.5);
+        assert!(is_skipped_sign_translation("[SKIP]"));
+        assert!(!is_skipped_sign_translation("Phó Hàn Thâm"));
         assert_eq!(restored.scene_note, "Bàn việc ở viện dưỡng lão");
         assert_eq!(speaker_code_to_hint("M:A"), "[Nam · A]");
         assert_eq!(speaker_code_to_hint("F:B"), "[Nữ · B]");

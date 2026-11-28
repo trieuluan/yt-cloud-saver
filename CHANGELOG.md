@@ -2,6 +2,14 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.46] - 2026-11-28
+
+### Added & Improved
+- **Cross-Platform Hardsub & On-Screen Sign Video OCR (`ocr/` / `macos/vision_ocr.m`):** Added dual-stream video OCR (`Apple Vision VNRecognizeTextRequest` built-in `0 MB` on macOS; `PP-OCRv4 ONNX` ~15.2 MB modular 1-click download via shared `ort` on Windows/Linux). Automatically probes 16:9 & 9:16 Shorts frames (`Auto: OCR → Whisper`), skips static frames via Pixel-Diff (`MAD`), filters watermarks, combines with `WeSpeaker + F0 + YAMNet` for `[Nam/Nữ · A/B]` speaker tags, and supports optional `Whisper` gap-fill for long unsubtitled speech.
+- **Progressive 3-Min Fast-Start OCR & H.264 1-Pass Extraction (`ocr/pipeline.rs` / `translate.rs`):** Prioritized lightweight `H.264` (`avc1`, 360p/480p) streams, merged `4 fps` Hardsub ROI and `1 fps` Scene Signs into a single-pass `ffmpeg -filter_complex` decode, and streamed Segment 0 (first 3 minutes) straight through `WeSpeaker` + LLM translation so live subtitles appear on YouTube within seconds while remaining segments process in the background.
+- **On-Screen Character Nameplates & Hardsub Cover (`extension/`):** Scanned upper-scene signs (`1 fps`), auto-sampled `fgHex`/`bgHex` colors & `serif`/`sans` styling, enriched `TranslationMemory.glossary` before dialogue translation, filtered background clutter via `[SKIP]`, and added **Cover Original Hardsub (`Off` / `Blur Glass` / `Solid Mask`)** + **Sign Badges** to YouTube & Cloud players.
+- **Desktop UI & Extension UX Fixes (`desktop/ui/` / `extension/`):** Added the Hardsub OCR settings card in **AI & Translate**, upgraded **Activity** `↻ Re-run ▾` to 3 modes (`Re-translate`, `Re-OCR Hardsub & Signs`, `Force Whisper`), fixed dropdown clipping at the bottom of the Activity list via viewport-aware `position: fixed` drop-up positioning, and fixed `AI CC` mode-switching race conditions during active progressive translation.
+
 ## [1.2.45] - 2026-11-27
 
 ### Fixed & Improved

@@ -58,6 +58,22 @@ const fetchModelsBtn = document.getElementById('fetchModelsBtn');
 const testAiBtn = document.getElementById('testAiBtn');
 const aiTestMsg = document.getElementById('aiTestMsg');
 const targetLangSelect = document.getElementById('targetLangSelect');
+const ocrCardTitle = document.getElementById('ocrCardTitle');
+const ocrEngineBadge = document.getElementById('ocrEngineBadge');
+const ocrModeAutoBtn = document.getElementById('ocrModeAutoBtn');
+const ocrModeOnlyBtn = document.getElementById('ocrModeOnlyBtn');
+const ocrModeOffBtn = document.getElementById('ocrModeOffBtn');
+const ocrModeHint = document.getElementById('ocrModeHint');
+const ppocrInstallBox = document.getElementById('ppocrInstallBox');
+const ppocrModelStatus = document.getElementById('ppocrModelStatus');
+const ppocrDlBtn = document.getElementById('ppocrDlBtn');
+const ppocrRmBtn = document.getElementById('ppocrRmBtn');
+const ocrSubOpts = document.getElementById('ocrSubOpts');
+const ocrRegionSelect = document.getElementById('ocrRegionSelect');
+const ocrSignsInput = document.getElementById('ocrSignsInput');
+const ocrGapFillInput = document.getElementById('ocrGapFillInput');
+const preferOcrInput = document.getElementById('preferOcrInput');
+const ocrMsg = document.getElementById('ocrMsg');
 const whisperFallbackInput = document.getElementById('whisperFallbackInput');
 const preferWhisperInput = document.getElementById('preferWhisperInput');
 const whisperCliStatus = document.getElementById('whisperCliStatus');
@@ -260,6 +276,67 @@ function renderVieneuUI(vieneu) {
 
 let currentWhisperMode = 'local';
 let currentYamnetSens = 'med';
+let currentOcrMode = 'auto';
+let latestOcrStatus = { nativeVision: true, ppocrInstalled: false, ready: true, engineName: 'apple-vision' };
+
+function renderOcrUI(ocr) {
+  if (ocr) {
+    latestOcrStatus = ocr;
+  }
+  const isMacVision = Boolean(latestOcrStatus.nativeVision);
+  const ppocrOk = Boolean(latestOcrStatus.ppocrInstalled);
+  const isOff = currentOcrMode === 'off';
+
+  ocrModeAutoBtn?.classList.toggle('active', currentOcrMode === 'auto');
+  ocrModeOnlyBtn?.classList.toggle('active', currentOcrMode === 'ocr_only');
+  ocrModeOffBtn?.classList.toggle('active', isOff);
+
+  if (ocrCardTitle) {
+    ocrCardTitle.textContent = isMacVision
+      ? 'Hardsub & Sign Video OCR (Apple Vision · macOS)'
+      : 'Hardsub & Sign Video OCR (PP-OCRv4 ONNX)';
+  }
+  if (ocrEngineBadge) {
+    if (isOff) {
+      ocrEngineBadge.textContent = 'Disabled';
+      ocrEngineBadge.className = 'muted';
+    } else if (isMacVision) {
+      ocrEngineBadge.textContent = '✓ Built-in · 0 MB';
+      ocrEngineBadge.className = 'tool-ok';
+    } else if (ppocrOk) {
+      ocrEngineBadge.textContent = '✓ ONNX Ready (15.2 MB)';
+      ocrEngineBadge.className = 'tool-ok';
+    } else {
+      ocrEngineBadge.textContent = 'PP-OCRv4 Not Installed';
+      ocrEngineBadge.className = 'muted';
+    }
+  }
+  if (ocrModeHint) {
+    if (currentOcrMode === 'auto') {
+      ocrModeHint.textContent =
+        'Quét thăm dò ~2s đầu: nếu có Hardsub sẽ chạy Video OCR + WeSpeaker; nếu không có chữ trên hình sẽ tự chuyển sang Whisper STT.';
+    } else if (currentOcrMode === 'ocr_only') {
+      ocrModeHint.textContent =
+        'Chỉ trích xuất phụ đề gắn cứng & bảng tên trên khung hình video (báo lỗi nếu video không có Hardsub).';
+    } else {
+      ocrModeHint.textContent =
+        'Tắt quét hình ảnh. Luôn dùng YouTube CC hoặc Whisper STT từ âm thanh như mặc định cũ.';
+    }
+  }
+  ppocrInstallBox?.classList.toggle('hidden', isMacVision || isOff);
+  if (!isMacVision && ppocrModelStatus) {
+    ppocrModelStatus.textContent = ppocrOk
+      ? '✓ PP-OCRv4 det + rec (15.2 MB · Ready)'
+      : 'PP-OCRv4 det + rec (~15.2 MB · Auto tạm dùng Whisper cho tới khi tải)';
+    ppocrModelStatus.className = ppocrOk ? 'tool-ok' : 'muted';
+    ppocrDlBtn?.classList.toggle('hidden', ppocrOk);
+    ppocrRmBtn?.classList.toggle('hidden', !ppocrOk);
+  }
+  if (ocrSubOpts) {
+    ocrSubOpts.style.opacity = isOff ? '0.45' : '1';
+    ocrSubOpts.style.pointerEvents = isOff ? 'none' : '';
+  }
+}
 
 function renderYamnetSens(sens) {
   currentYamnetSens = sens === 'low' || sens === 'high' ? sens : 'med';
@@ -500,22 +577,31 @@ function renderJobs(jobs = [], translations = []) {
       (sub) => {
         const isRerunOpen = openDropdownKind === 'rerun' && openDropdownFile === sub.fileName ? ' open' : '';
         const isExportOpen = openDropdownKind === 'export' && openDropdownFile === sub.fileName ? ' open' : '';
+        const srcText = sub.ocrEngine ? `${sub.source} (${sub.ocrEngine})` : sub.source;
+        const signsBadge = sub.signCount ? ` · 🏷 ${sub.signCount} signs` : '';
+        const reocrOption = latestOcrStatus.ready
+          ? `
+                <button type="button" class="export-option" data-reocr-sub="${escapeHtml(sub.fileName)}" title="Re-scan video frames with Hardsub & Sign OCR, run WeSpeaker, and translate">
+                  <span class="menu-item-title" style="color:#6ee7b7;">👁 Re-OCR Hardsub &amp; Signs</span>
+                  <span class="menu-item-desc">Scan video frames (${escapeHtml(latestOcrStatus.engineName)}) + WeSpeaker</span>
+                </button>`
+          : '';
         return `
       <div class="job-item">
         <div class="job-title"><span class="kind-pill kind-sub">Sub ✓</span>${escapeHtml(sub.title)}</div>
         <div class="sub-footer">
-          <div class="job-meta">${escapeHtml(sub.targetLang)} · ${escapeHtml(sub.source)} · ${sub.lineCount} lines</div>
+          <div class="job-meta">${escapeHtml(sub.targetLang)} · ${escapeHtml(srcText)} · ${sub.lineCount} lines${signsBadge}</div>
           <div class="btn-group">
             <div class="export-dropdown${isRerunOpen}" data-kind="rerun" data-file="${escapeHtml(sub.fileName)}">
-              <button type="button" class="btn-accent-ghost btn-xs" data-rerun-toggle="${escapeHtml(sub.fileName)}" title="Re-translate existing text or re-run Whisper from audio">↻ Re-run ▾</button>
+              <button type="button" class="btn-accent-ghost btn-xs" data-rerun-toggle="${escapeHtml(sub.fileName)}" title="Re-translate, Re-OCR video frames, or Force Whisper audio">↻ Re-run ▾</button>
               <div class="export-menu rerun-menu">
-                <button type="button" class="export-option" data-retranslate-sub="${escapeHtml(sub.fileName)}" title="Keep cached transcription/CC and only re-translate lines">
+                <button type="button" class="export-option" data-retranslate-sub="${escapeHtml(sub.fileName)}" title="Keep cached transcription/OCR & signs and only re-translate lines">
                   <span class="menu-item-title" style="color:#d8b4fe;">↻ Re-translate</span>
-                  <span class="menu-item-desc">Keep original text · AI translates again (fast)</span>
-                </button>
-                <button type="button" class="export-option" data-rewhisper-sub="${escapeHtml(sub.fileName)}" title="Delete cached subtitles, download audio, re-run Whisper & translate">
-                  <span class="menu-item-title" style="color:#7dd3fc;">🎙 Re-whisper + Translate</span>
-                  <span class="menu-item-desc">Re-download audio · Whisper again from scratch</span>
+                  <span class="menu-item-desc">Keep cached text &amp; signs · AI translates again (fast)</span>
+                </button>${reocrOption}
+                <button type="button" class="export-option" data-rewhisper-sub="${escapeHtml(sub.fileName)}" title="Ignore video hardsub, download audio, force Whisper & translate">
+                  <span class="menu-item-title" style="color:#7dd3fc;">🎙 Force Whisper + Translate</span>
+                  <span class="menu-item-desc">Ignore video text · Force Whisper from audio</span>
                 </button>
               </div>
             </div>
@@ -537,6 +623,39 @@ function renderJobs(jobs = [], translations = []) {
     .join('');
 
   jobsList.innerHTML = jobHtml + subHtml;
+  const reopened = jobsList.querySelector('.export-dropdown.open');
+  if (reopened) positionDropdownMenu(reopened);
+}
+
+function positionDropdownMenu(dropdownEl) {
+  const menu = dropdownEl?.querySelector('.export-menu');
+  const btn = dropdownEl?.querySelector('button');
+  if (!menu || !btn) return;
+
+  const btnRect = btn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const mw = menuRect.width || 240;
+  const mh = menuRect.height || 150;
+  const margin = 8;
+  const footerSafeBottom = window.innerHeight - 38;
+
+  // Horizontal: align right edge with button right edge, clamped inside window
+  let left = btnRect.right - mw;
+  if (left < margin) left = margin;
+  if (left + mw > window.innerWidth - margin) {
+    left = Math.max(margin, window.innerWidth - mw - margin);
+  }
+
+  // Vertical: open downward if fits above footer, otherwise flip upward above button
+  let top = btnRect.bottom + 4;
+  if (top + mh > footerSafeBottom && btnRect.top - 4 - mh >= 44) {
+    top = btnRect.top - mh - 4;
+  } else if (top + mh > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - mh - margin);
+  }
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
 }
 
 async function openDirectory(remotePath, allowFallback = true) {
@@ -592,6 +711,11 @@ async function persistSettings() {
         whisperCloudApiKey: whisperCloudKeyInput.value.trim(),
         whisperCloudModel: whisperCloudModelInput.value.trim(),
         preferWhisperOverAutoCc: preferWhisperInput.checked,
+        ocrMode: currentOcrMode,
+        ocrRegion: ocrRegionSelect ? ocrRegionSelect.value : 'auto',
+        ocrTranslateSigns: ocrSignsInput ? ocrSignsInput.checked : true,
+        preferOcrOverAutoCc: preferOcrInput ? preferOcrInput.checked : true,
+        ocrGapFillWhisper: ocrGapFillInput ? ocrGapFillInput.checked : true,
         skipMusicWhisper: skipMusicWhisperInput.checked,
         yamnetSensitivity: currentYamnetSens,
         useSpeakerDiarization: speakerDiarizeInput.checked,
@@ -677,6 +801,11 @@ async function loadState() {
       whisperCloudKeyInput.value = data.config.whisperCloudApiKey || '';
       whisperCloudModelInput.value = data.config.whisperCloudModel || 'whisper-large-v3-turbo';
       preferWhisperInput.checked = Boolean(data.config.preferWhisperOverAutoCc);
+      currentOcrMode = data.config.ocrMode || 'auto';
+      if (ocrRegionSelect) ocrRegionSelect.value = data.config.ocrRegion || 'auto';
+      if (ocrSignsInput) ocrSignsInput.checked = data.config.ocrTranslateSigns !== false;
+      if (preferOcrInput) preferOcrInput.checked = data.config.preferOcrOverAutoCc !== false;
+      if (ocrGapFillInput) ocrGapFillInput.checked = data.config.ocrGapFillWhisper !== false;
       skipMusicWhisperInput.checked = data.config.skipMusicWhisper !== false;
       renderYamnetSens(data.config.yamnetSensitivity || 'med');
       speakerDiarizeInput.checked = Boolean(data.config.useSpeakerDiarization);
@@ -694,6 +823,7 @@ async function loadState() {
       vieneuRefAudioInput.value = data.config.vieneuRefAudio || '';
       updatePathPreview();
     }
+    renderOcrUI(data.ocr);
     renderWhisperUI(data.whisper);
     renderVieneuUI(data.vieneu);
 
@@ -724,10 +854,49 @@ provBtns.forEach((btn) => {
 });
 
 [aiBaseUrlInput, aiApiKeyInput, aiModelInput].forEach((el) => el.addEventListener('change', persistSettings));
-[targetLangSelect, geminiThinkingSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, skipMusicWhisperInput, speakerDiarizeInput, embedSubtitlesInput].filter(Boolean).forEach((el) => el.addEventListener('change', () => {
+[targetLangSelect, geminiThinkingSelect, whisperLangSelect, whisperFallbackInput, preferWhisperInput, ocrRegionSelect, ocrSignsInput, ocrGapFillInput, preferOcrInput, skipMusicWhisperInput, speakerDiarizeInput, embedSubtitlesInput].filter(Boolean).forEach((el) => el.addEventListener('change', () => {
   renderYamnetSens(currentYamnetSens);
+  renderOcrUI();
   persistSettings();
 }));
+
+ocrModeAutoBtn?.addEventListener('click', () => { currentOcrMode = 'auto'; renderOcrUI(); persistSettings(); });
+ocrModeOnlyBtn?.addEventListener('click', () => { currentOcrMode = 'ocr_only'; renderOcrUI(); persistSettings(); });
+ocrModeOffBtn?.addEventListener('click', () => { currentOcrMode = 'off'; renderOcrUI(); persistSettings(); });
+
+ppocrDlBtn?.addEventListener('click', async () => {
+  ocrMsg?.classList.add('hidden');
+  ppocrDlBtn.disabled = true;
+  ppocrDlBtn.textContent = 'Downloading...';
+  try {
+    const status = await invoke('download_ppocr_model_cmd');
+    renderOcrUI(status);
+  } catch (err) {
+    if (ocrMsg) {
+      ocrMsg.textContent = String(err);
+      ocrMsg.classList.remove('hidden');
+    }
+  } finally {
+    ppocrDlBtn.disabled = false;
+    ppocrDlBtn.textContent = 'Download';
+  }
+});
+
+ppocrRmBtn?.addEventListener('click', async () => {
+  ocrMsg?.classList.add('hidden');
+  ppocrRmBtn.disabled = true;
+  try {
+    const status = await invoke('remove_ppocr_model_cmd');
+    renderOcrUI(status);
+  } catch (err) {
+    if (ocrMsg) {
+      ocrMsg.textContent = String(err);
+      ocrMsg.classList.remove('hidden');
+    }
+  } finally {
+    ppocrRmBtn.disabled = false;
+  }
+});
 
 wespeakerDlBtn?.addEventListener('click', async () => {
   whisperMsg.classList.add('hidden');
@@ -1336,7 +1505,10 @@ jobsList.addEventListener('click', async (e) => {
     const current = toggleBtn.closest('.export-dropdown');
     const wasOpen = current?.classList.contains('open');
     jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
-    if (current && !wasOpen) current.classList.add('open');
+    if (current && !wasOpen) {
+      current.classList.add('open');
+      positionDropdownMenu(current);
+    }
     return;
   }
 
@@ -1346,8 +1518,10 @@ jobsList.addEventListener('click', async (e) => {
   const exportSub = target.getAttribute('data-export-sub');
   const exportMode = target.getAttribute('data-export-mode') || 'translated';
   const retranslateBtn = target.closest('[data-retranslate-sub]');
+  const reocrBtn = target.closest('[data-reocr-sub]');
   const rewhisperBtn = target.closest('[data-rewhisper-sub]');
   const retranslateSub = retranslateBtn?.getAttribute('data-retranslate-sub');
+  const reocrSub = reocrBtn?.getAttribute('data-reocr-sub');
   const rewhisperSub = rewhisperBtn?.getAttribute('data-rewhisper-sub');
   const deleteSub = target.getAttribute('data-delete-sub');
   if (cancelId) {
@@ -1378,6 +1552,15 @@ jobsList.addEventListener('click', async (e) => {
       activityHint.classList.remove('hidden');
       activityHint.textContent = `Re-translate failed: ${err}`;
     }
+  } else if (reocrSub) {
+    jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
+    try {
+      await invoke('reocr_subtitle_cache', { fileName: reocrSub });
+      await loadState();
+    } catch (err) {
+      activityHint.classList.remove('hidden');
+      activityHint.textContent = `Re-OCR failed: ${err}`;
+    }
   } else if (rewhisperSub) {
     jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
     try {
@@ -1397,6 +1580,17 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.export-dropdown')) {
     jobsList.querySelectorAll('.export-dropdown.open').forEach((el) => el.classList.remove('open'));
   }
+});
+
+[jobsList, viewActivity].filter(Boolean).forEach((el) =>
+  el.addEventListener('scroll', () => {
+    const openEl = jobsList.querySelector('.export-dropdown.open');
+    if (openEl) positionDropdownMenu(openEl);
+  }),
+);
+window.addEventListener('resize', () => {
+  const openEl = jobsList.querySelector('.export-dropdown.open');
+  if (openEl) positionDropdownMenu(openEl);
 });
 
 guideBtn.addEventListener('click', () => guideModal.classList.remove('hidden'));

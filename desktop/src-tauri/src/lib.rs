@@ -1,6 +1,7 @@
 mod config;
 mod diarize;
 mod jobs;
+mod ocr;
 mod rclone_stream;
 mod server;
 mod tools;
@@ -44,6 +45,7 @@ pub struct DashboardState {
     pub app_version: String,
     pub tools: ToolsStatus,
     pub whisper: WhisperStatus,
+    pub ocr: ocr::OcrStatus,
     pub vieneu: VieneuStatus,
     pub remotes: Vec<String>,
     pub config: AppConfig,
@@ -62,6 +64,7 @@ async fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardStat
         state.jobs.get_saved_ids()
     );
     let whisper = check_whisper_status(&state.data_dir, &state.bin_dir);
+    let ocr = ocr::check_ocr_status(&state.data_dir);
     let vieneu = check_vieneu_status(&state.data_dir);
     let translations = translate::list_cached_subtitles(&state.data_dir);
     let config = load_config(&state.data_dir);
@@ -69,6 +72,7 @@ async fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardStat
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         tools,
         whisper,
+        ocr,
         vieneu,
         remotes,
         config,
@@ -160,6 +164,18 @@ async fn download_wespeaker_model_cmd(state: State<'_, AppState>) -> Result<Whis
 async fn remove_wespeaker_model_cmd(state: State<'_, AppState>) -> Result<WhisperStatus, String> {
     diarize::remove_wespeaker_model(&state.data_dir)?;
     Ok(check_whisper_status(&state.data_dir, &state.bin_dir))
+}
+
+#[tauri::command]
+async fn download_ppocr_model_cmd(state: State<'_, AppState>) -> Result<ocr::OcrStatus, String> {
+    ocr::ppocr_onnx::ensure_ppocr_models(&state.data_dir).await?;
+    Ok(ocr::check_ocr_status(&state.data_dir))
+}
+
+#[tauri::command]
+async fn remove_ppocr_model_cmd(state: State<'_, AppState>) -> Result<ocr::OcrStatus, String> {
+    ocr::ppocr_onnx::remove_ppocr_models(&state.data_dir)?;
+    Ok(ocr::check_ocr_status(&state.data_dir))
 }
 
 #[tauri::command]
@@ -347,6 +363,17 @@ async fn rewhisper_subtitle_cache(
 }
 
 #[tauri::command]
+async fn reocr_subtitle_cache(
+    state: State<'_, AppState>,
+    file_name: String,
+) -> Result<Job, String> {
+    let (video_id, title) = translate::prepare_reocr_from_cache(&state.data_dir, &file_name)?;
+    let title = translate::resolve_youtube_title_if_missing(&video_id, title).await;
+    let url = format!("https://www.youtube.com/watch?v={video_id}");
+    Ok(state.jobs.enqueue_translate(url, video_id, title).await)
+}
+
+#[tauri::command]
 async fn backup_subtitles_cloud(state: State<'_, AppState>) -> Result<usize, String> {
     let cfg = load_config(&state.data_dir);
     translate::backup_subtitles_to_cloud(&state.data_dir, &state.bin_dir, &cfg.rclone_remote).await
@@ -525,6 +552,7 @@ pub fn run() {
             delete_subtitle_cache,
             retranslate_subtitle_cache,
             rewhisper_subtitle_cache,
+            reocr_subtitle_cache,
             backup_subtitles_cloud,
             restore_subtitles_cloud,
             check_app_update,
@@ -543,6 +571,8 @@ pub fn run() {
             remove_yamnet_model_cmd,
             download_wespeaker_model_cmd,
             remove_wespeaker_model_cmd,
+            download_ppocr_model_cmd,
+            remove_ppocr_model_cmd,
             install_vieneu_runtime_cmd,
             remove_vieneu_runtime_cmd,
             download_vieneu_model_cmd,

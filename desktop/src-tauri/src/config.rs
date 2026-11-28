@@ -93,6 +93,16 @@ pub struct AppConfig {
     pub whisper_cloud_model: String,
     #[serde(default)]
     pub prefer_whisper_over_auto_cc: bool,
+    #[serde(default = "default_ocr_mode")]
+    pub ocr_mode: String,
+    #[serde(default = "default_ocr_region")]
+    pub ocr_region: String,
+    #[serde(default = "default_true")]
+    pub ocr_translate_signs: bool,
+    #[serde(default = "default_true")]
+    pub prefer_ocr_over_auto_cc: bool,
+    #[serde(default = "default_true")]
+    pub ocr_gap_fill_whisper: bool,
     #[serde(default = "default_true")]
     pub skip_music_whisper: bool,
     #[serde(default = "default_yamnet_sensitivity")]
@@ -152,6 +162,12 @@ fn default_tts_mode() -> String {
 fn default_yamnet_sensitivity() -> String {
     "med".to_string()
 }
+fn default_ocr_mode() -> String {
+    "auto".to_string()
+}
+fn default_ocr_region() -> String {
+    "auto".to_string()
+}
 fn default_vieneu_model() -> String {
     "v3turbo".to_string()
 }
@@ -188,6 +204,11 @@ impl Default for AppConfig {
             whisper_cloud_api_key: String::new(),
             whisper_cloud_model: default_whisper_cloud_model(),
             prefer_whisper_over_auto_cc: false,
+            ocr_mode: default_ocr_mode(),
+            ocr_region: default_ocr_region(),
+            ocr_translate_signs: true,
+            prefer_ocr_over_auto_cc: true,
+            ocr_gap_fill_whisper: true,
             skip_music_whisper: true,
             yamnet_sensitivity: default_yamnet_sensitivity(),
             use_speaker_diarization: false,
@@ -227,6 +248,11 @@ pub struct ConfigPatch {
     pub whisper_cloud_api_key: Option<String>,
     pub whisper_cloud_model: Option<String>,
     pub prefer_whisper_over_auto_cc: Option<bool>,
+    pub ocr_mode: Option<String>,
+    pub ocr_region: Option<String>,
+    pub ocr_translate_signs: Option<bool>,
+    pub prefer_ocr_over_auto_cc: Option<bool>,
+    pub ocr_gap_fill_whisper: Option<bool>,
     pub skip_music_whisper: Option<bool>,
     pub yamnet_sensitivity: Option<String>,
     pub use_speaker_diarization: Option<bool>,
@@ -334,6 +360,29 @@ pub fn save_config(data_dir: &Path, patch: ConfigPatch) -> Result<AppConfig, Str
     }
     if let Some(pw) = patch.prefer_whisper_over_auto_cc {
         cfg.prefer_whisper_over_auto_cc = pw;
+    }
+    if let Some(om) = patch.ocr_mode {
+        let clean = om.trim().to_string();
+        cfg.ocr_mode = match clean.as_str() {
+            "ocr_only" | "off" => clean,
+            _ => "auto".to_string(),
+        };
+    }
+    if let Some(or) = patch.ocr_region {
+        let clean = or.trim().to_string();
+        cfg.ocr_region = match clean.as_str() {
+            "bottom" | "shorts" => clean,
+            _ => "auto".to_string(),
+        };
+    }
+    if let Some(ts) = patch.ocr_translate_signs {
+        cfg.ocr_translate_signs = ts;
+    }
+    if let Some(po) = patch.prefer_ocr_over_auto_cc {
+        cfg.prefer_ocr_over_auto_cc = po;
+    }
+    if let Some(gf) = patch.ocr_gap_fill_whisper {
+        cfg.ocr_gap_fill_whisper = gf;
     }
     if let Some(sm) = patch.skip_music_whisper {
         cfg.skip_music_whisper = sm;

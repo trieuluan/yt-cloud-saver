@@ -421,16 +421,16 @@ select:focus {
 }
 
 .export-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
   min-width: 158px;
   background: #1c2029;
   border: 1px solid #2f3646;
   border-radius: 8px;
   padding: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  z-index: 30;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  z-index: 200;
   display: none;
   flex-direction: column;
   gap: 2px;

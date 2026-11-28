@@ -2,6 +2,7 @@
   const HOST_ID = 'yt-cloud-saver-host';
   const PLAYER_FRAME_ID = 'yt-cloud-saver-player';
   const SUB_OVERLAY_ID = 'yt-cloud-saver-subs';
+  const SIGN_OVERLAY_ID = 'yt-cloud-saver-signs';
   const ACTIVE_STATUSES = new Set(['queued', 'downloading', 'uploading']);
 
   let currentJob = null;
@@ -32,6 +33,8 @@
     multiVoice: false,
     dubFemaleVoice: 'vieneu:Ngọc Huyền',
     dubMaleVoice: 'vieneu:Hải Đăng',
+    hardsubCover: 'blur',
+    showSigns: true,
   };
 
   chrome.storage.local.get({ subStyle }, (res) => {
@@ -43,7 +46,9 @@
       subStyle = { ...subStyle, ...changes.subStyle.newValue };
       if (subMode !== 'off' && prevDefault !== subStyle.defaultMode) {
         subMode = subStyle.defaultMode;
+        subCycleStartMode = subStyle.defaultMode;
         updateSubButtons();
+        if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       }
       if (dubEnabled && savedVolume !== null) {
         const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
@@ -546,9 +551,14 @@
     if (existing) existing.remove();
   }
 
+  let lastRenderedSignKey = '';
+
   function removeSubOverlay() {
     const el = document.getElementById(SUB_OVERLAY_ID);
     if (el) el.remove();
+    const signEl = document.getElementById(SIGN_OVERLAY_ID);
+    if (signEl) signEl.remove();
+    lastRenderedSignKey = '';
     if (syncRaf) {
       cancelAnimationFrame(syncRaf);
       syncRaf = null;
@@ -561,14 +571,30 @@
     updateSubButtons();
   }
 
+  let translateInFlight = null;
+  let activeTranslatePct = null;
+  let activeTranslateStage = '';
+
   function updateSubButtons() {
     if (subBtnEl) {
+      const pctSuffix = activeTranslatePct !== null ? ` (${activeTranslatePct}%)` : '';
       subBtnEl.dataset.state =
-        subMode === 'bilingual' ? 'active' : subMode === 'translated' ? 'translated' : 'idle';
+        subMode === 'bilingual'
+          ? 'active'
+          : subMode === 'translated'
+            ? 'translated'
+            : activeTranslatePct !== null
+              ? 'active'
+              : 'idle';
       const label =
-        subMode === 'bilingual' ? 'AI CC: Bilingual' : subMode === 'translated' ? 'AI CC: Translated' : 'AI CC: OFF';
+        subMode === 'bilingual'
+          ? 'AI CC: Bilingual'
+          : subMode === 'translated'
+            ? 'AI CC: Translated'
+            : 'AI CC: OFF';
       const txt = subBtnEl.querySelector('.txt');
-      if (txt) txt.textContent = label;
+      if (txt) txt.textContent = label + pctSuffix;
+      subBtnEl.title = activeTranslateStage || 'Toggle AI Subtitles (Option/Alt + C)';
     }
     if (dubBtnEl) {
       dubBtnEl.dataset.state = dubEnabled ? 'done' : 'idle';
@@ -577,38 +603,171 @@
     }
   }
 
-  function ensureSubOverlay() {
-    let overlay = document.getElementById(SUB_OVERLAY_ID);
-    if (overlay) return overlay;
+  function escapeHtmlSafe(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function computeRenderedVideoBox(video, player) {
+    const pr = player.getBoundingClientRect();
+    if (!video || !pr.width || !pr.height) {
+      return { left: 0, top: 0, width: pr.width || 640, height: pr.height || 360, playerH: pr.height || 360 };
+    }
+    const vr = video.getBoundingClientRect();
+    const vw = video.videoWidth || vr.width || pr.width;
+    const vh = video.videoHeight || vr.height || pr.height;
+    if (!vw || !vh || !vr.width || !vr.height) {
+      return { left: 0, top: 0, width: pr.width, height: pr.height, playerH: pr.height };
+    }
+    const vidAspect = vw / vh;
+    const boxAspect = vr.width / vr.height;
+    let rw = vr.width;
+    let rh = vr.height;
+    if (boxAspect > vidAspect + 0.01) {
+      rw = vr.height * vidAspect;
+    } else if (boxAspect < vidAspect - 0.01) {
+      rh = vr.width / vidAspect;
+    }
+    const left = (vr.left - pr.left) + (vr.width - rw) * 0.5;
+    const top = (vr.top - pr.top) + (vr.height - rh) * 0.5;
+    return { left, top, width: rw, height: rh, playerH: pr.height };
+  }
+
+  function ensureSignOverlay(video) {
+    const player = document.querySelector('#movie_player') || document.querySelector('#player');
+    if (!player) return null;
+    let layer = document.getElementById(SIGN_OVERLAY_ID);
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = SIGN_OVERLAY_ID;
+      Object.assign(layer.style, {
+        position: 'absolute',
+        zIndex: '59',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+      });
+      player.appendChild(layer);
+    }
+    const vbox = computeRenderedVideoBox(video, player);
+    layer.style.left = `${Math.round(vbox.left)}px`;
+    layer.style.top = `${Math.round(vbox.top)}px`;
+    layer.style.width = `${Math.round(vbox.width)}px`;
+    layer.style.height = `${Math.round(vbox.height)}px`;
+    return { layer, vbox };
+  }
+
+  function renderActiveSigns(video, nowMs) {
+    if (subMode === 'off' || subStyle.showSigns === false || !subBundle?.signs?.length) {
+      const existing = document.getElementById(SIGN_OVERLAY_ID);
+      if (existing && existing.innerHTML !== '') {
+        existing.innerHTML = '';
+        lastRenderedSignKey = '';
+      }
+      return;
+    }
+    const active = subBundle.signs.filter(
+      (s) => s.translated && nowMs >= s.startMs && nowMs <= s.endMs,
+    );
+    const wrapped = ensureSignOverlay(video);
+    if (!wrapped) return;
+    const { layer, vbox } = wrapped;
+    const stateKey = `${Math.round(vbox.height)}|${active.map((s) => `${s.startMs}:${s.translated}`).join('||')}`;
+    if (stateKey === lastRenderedSignKey) return;
+    lastRenderedSignKey = stateKey;
+
+    if (!active.length) {
+      layer.innerHTML = '';
+      return;
+    }
+
+    layer.innerHTML = active
+      .map((s) => {
+        const fg = s.fgHex || '#FFFFFF';
+        const bgAlpha = s.solidPlate ? 0.94 : 0.80;
+        const bg = hexToRgba(s.bgHex || '#111827', bgAlpha);
+        const fontFam =
+          s.fontStyle === 'serif'
+            ? "Georgia, 'Noto Serif', 'Times New Roman', serif"
+            : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        const isVert = s.hPct > s.wPct * 1.75;
+        const pxH = Math.max(18, (s.hPct / 100) * vbox.height);
+        const baseFontPx = Math.max(11, Math.min(24, Math.round(isVert ? pxH * 0.18 : pxH * 0.42)));
+
+        const parts = String(s.translated).split(/\s*·\s*/);
+        const innerLines =
+          parts.length >= 2
+            ? `<div style="font-weight:700;font-size:${baseFontPx}px;line-height:1.22;letter-spacing:0.02em;">${escapeHtmlSafe(parts[0])}</div><div style="font-weight:500;font-size:${Math.max(10, Math.round(baseFontPx * 0.82))}px;opacity:0.92;line-height:1.22;margin-top:2px;">${escapeHtmlSafe(parts.slice(1).join(' · '))}</div>`
+            : `<div style="font-weight:700;font-size:${baseFontPx}px;line-height:1.25;">${escapeHtmlSafe(s.translated)}</div>`;
+
+        if (isVert) {
+          const cx = Math.min(92, Math.max(8, s.xPct + s.wPct * 0.5));
+          const cy = Math.min(88, Math.max(8, s.yPct + s.hPct * 0.5));
+          return `
+            <div style="position:absolute;left:${s.xPct.toFixed(2)}%;top:${s.yPct.toFixed(2)}%;width:${s.wPct.toFixed(2)}%;height:${s.hPct.toFixed(2)}%;background:${bg};backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border-radius:6px;"></div>
+            <div style="position:absolute;left:${cx.toFixed(2)}%;top:${cy.toFixed(2)}%;transform:translate(-50%,-50%);background:${bg};color:${fg};font-family:${fontFam};padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.18);box-shadow:0 4px 14px rgba(0,0,0,0.4);text-align:center;max-width:46%;">${innerLines}</div>
+          `;
+        }
+
+        const leftPct = Math.max(0.5, s.xPct - 0.6);
+        const topPct = Math.max(0.5, s.yPct - 0.4);
+        const minWPct = Math.min(96 - leftPct, s.wPct + 1.2);
+        const minHPct = Math.min(92 - topPct, s.hPct + 0.8);
+        return `<div style="position:absolute;left:${leftPct.toFixed(2)}%;top:${topPct.toFixed(2)}%;min-width:${minWPct.toFixed(2)}%;min-height:${minHPct.toFixed(2)}%;max-width:68%;background:${bg};backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);color:${fg};font-family:${fontFam};padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.16);box-shadow:0 3px 12px rgba(0,0,0,0.38);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;">${innerLines}</div>`;
+      })
+      .join('');
+  }
+
+  function ensureSubOverlay(video) {
     const player = document.querySelector('#movie_player') || document.querySelector('#player');
     if (!player) return null;
     if (window.getComputedStyle(player).position === 'static') {
       player.style.position = 'relative';
     }
-    overlay = document.createElement('div');
-    overlay.id = SUB_OVERLAY_ID;
-    const syncOverlayBottom = () => {
+    let overlay = document.getElementById(SUB_OVERLAY_ID);
+    const applyOverlayPosition = () => {
+      if (!overlay) return;
+      const coverMode = subStyle.hardsubCover || 'blur';
+      const hbox = subBundle?.hardsubBox;
+      if (coverMode !== 'off' && hbox && video) {
+        const vbox = computeRenderedVideoBox(video, player);
+        const bottomGapPx = Math.max(0, vbox.playerH - (vbox.top + vbox.height));
+        const targetBottomPx = bottomGapPx + (Number(hbox.bottomPct || 7) / 100) * vbox.height;
+        const autohide = player.classList.contains('ytp-autohide');
+        const finalBottom = autohide ? Math.max(8, targetBottomPx - 4) : Math.max(56, targetBottomPx);
+        overlay.style.bottom = `${Math.round(finalBottom)}px`;
+        return;
+      }
       overlay.style.bottom = player.classList.contains('ytp-autohide') ? '22px' : '66px';
     };
-    Object.assign(overlay.style, {
-      position: 'absolute',
-      left: '8%',
-      right: '8%',
-      bottom: player.classList.contains('ytp-autohide') ? '22px' : '66px',
-      zIndex: '60',
-      textAlign: 'center',
-      pointerEvents: 'none',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '4px',
-      transition: 'bottom 0.22s ease',
-    });
+
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = SUB_OVERLAY_ID;
+      Object.assign(overlay.style, {
+        position: 'absolute',
+        left: '6%',
+        right: '6%',
+        bottom: player.classList.contains('ytp-autohide') ? '22px' : '66px',
+        zIndex: '60',
+        textAlign: 'center',
+        pointerEvents: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '4px',
+        transition: 'bottom 0.18s ease',
+      });
+      player.appendChild(overlay);
+    }
+    player._ytcsSyncOverlayPos = applyOverlayPosition;
     if (!player._ytcsAutohideObs) {
-      player._ytcsAutohideObs = new MutationObserver(syncOverlayBottom);
+      player._ytcsAutohideObs = new MutationObserver(() => player._ytcsSyncOverlayPos?.());
       player._ytcsAutohideObs.observe(player, { attributes: true, attributeFilter: ['class'] });
     }
-    player.appendChild(overlay);
+    applyOverlayPosition();
     return overlay;
   }
 
@@ -1057,27 +1216,38 @@
 
   function tickSubtitles() {
     const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-    if (video && subBundle?.cues?.length && (subMode !== 'off' || dubEnabled)) {
+    if (video && (subBundle?.cues?.length || subBundle?.signs?.length) && (subMode !== 'off' || dubEnabled)) {
       const nowMs = video.currentTime * 1000;
-      const idx = subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs);
+      const idx = subBundle.cues ? subBundle.cues.findIndex((c) => nowMs >= c.startMs && nowMs <= c.endMs) : -1;
       const cue = idx >= 0 ? subBundle.cues[idx] : null;
 
+      renderActiveSigns(video, nowMs);
+
       if (subMode !== 'off') {
-        const overlay = ensureSubOverlay();
+        const overlay = ensureSubOverlay(video);
         if (overlay) {
           if (!cue) {
             overlay.innerHTML = '';
           } else {
-            const a = (Number(subStyle.bgOpacity ?? 80) / 100);
-            const trBg = hexToRgba(subStyle.bgColor, a.toFixed(2));
-            const origBg = hexToRgba(subStyle.bgColor, (a * 0.85).toFixed(2));
+            const coverMode = subStyle.hardsubCover || 'blur';
+            const hasHardsub = Boolean(subBundle?.hardsubBox) && coverMode !== 'off';
+            const a = Number(subStyle.bgOpacity ?? 80) / 100;
+            const trAlpha = coverMode === 'solid' && hasHardsub ? 0.96 : hasHardsub ? Math.max(a, 0.78) : a;
+            const trBg = hexToRgba(subStyle.bgColor, trAlpha.toFixed(2));
+            const origBg = hexToRgba(subStyle.bgColor, (trAlpha * 0.86).toFixed(2));
+            const blurCss =
+              coverMode === 'blur' && hasHardsub
+                ? 'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);min-width:52%;'
+                : coverMode === 'solid' && hasHardsub
+                  ? 'min-width:56%;'
+                  : '';
             const trSize = Number(subStyle.fontSize || 18);
             const origSize = Math.max(11, Math.round(trSize * 0.78));
             const origHtml =
               subMode === 'bilingual'
-                ? `<div style="background:${origBg};color:#e2e8f0;padding:3px 10px;border-radius:6px;font-size:${origSize}px;line-height:1.35;">${cue.original.replace(/</g, '&lt;')}</div>`
+                ? `<div style="background:${origBg};${blurCss}color:#e2e8f0;padding:3px 12px;border-radius:6px;font-size:${origSize}px;line-height:1.35;">${escapeHtmlSafe(cue.original)}</div>`
                 : '';
-            const trHtml = `<div style="background:${trBg};color:${subStyle.textColor || '#ffffff'};padding:5px 12px;border-radius:8px;font-size:${trSize}px;font-weight:600;line-height:1.35;text-shadow:0 1px 3px #000;">${cue.translated.replace(/</g, '&lt;')}</div>`;
+            const trHtml = `<div style="background:${trBg};${blurCss}color:${subStyle.textColor || '#ffffff'};padding:6px 16px;border-radius:8px;font-size:${trSize}px;font-weight:600;line-height:1.35;text-shadow:0 1px 3px #000;">${escapeHtmlSafe(cue.translated)}</div>`;
             overlay.innerHTML = origHtml + trHtml;
           }
         }
@@ -1105,18 +1275,20 @@
   async function waitForTranslateJob(jobId, videoId) {
     while (true) {
       await new Promise((r) => setTimeout(r, 1500));
+      if (getVideoId() !== videoId) return null;
       const { job } = await sendBg('GET_JOB', { id: jobId });
+      if (getVideoId() !== videoId) return null;
       if (!job) throw new Error('Translation job disappeared');
 
-      // Progressive subtitle loading: start showing translated cues as soon as chunk 1 / batch 1 is cached
-      if (job.progress >= 20 || job.status === 'done') {
+      // Progressive subtitle loading: update bundle cues/signs without clobbering user's chosen subMode
+      if (job.progress >= 15 || job.status === 'done') {
         try {
           const partial = await sendBg('GET_SUBTITLES', { videoId });
-          if (partial?.cues?.length) {
+          if (getVideoId() !== videoId) return null;
+          if (partial && (partial.cues?.length || partial.signs?.length)) {
             subBundle = partial;
-            if (subMode === 'off') {
-              subMode = 'bilingual';
-              if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
+            if ((subMode !== 'off' || dubEnabled) && !syncRaf) {
+              syncRaf = requestAnimationFrame(tickSubtitles);
             }
           }
         } catch {
@@ -1125,41 +1297,70 @@
       }
 
       if (job.status === 'done') {
-        return subBundle || (await sendBg('GET_SUBTITLES', { videoId }));
+        const finalBundle = await sendBg('GET_SUBTITLES', { videoId }).catch(() => subBundle);
+        if (getVideoId() === videoId && finalBundle) {
+          subBundle = finalBundle;
+        }
+        return subBundle;
       }
       if (job.status === 'error' || job.status === 'cancelled') {
         throw new Error(job.error || 'Translation failed');
       }
-      subBtnEl.title = job.stageText || 'Translating...';
-      const txtEl = subBtnEl.querySelector('.txt');
-      if (txtEl) txtEl.textContent = `AI CC: ${job.progress || 0}%`;
+      activeTranslatePct = job.progress || 0;
+      activeTranslateStage = job.stageText || 'Translating...';
+      updateSubButtons();
     }
   }
 
   async function ensureTranslatedBundle() {
     const videoId = getVideoId();
     if (!videoId) return null;
-    if (subBundle && subBundle.videoId === videoId) return subBundle;
-    const txtEl = subBtnEl.querySelector('.txt');
-    if (txtEl) txtEl.textContent = 'Translating...';
-    subBtnEl.dataset.state = 'active';
-    const res = await sendBg('TRANSLATE_VIDEO', {
-      payload: {
-        url: getCleanVideoUrl(videoId),
-        videoId,
-        title: getVideoTitle(),
-      },
-    });
-    if (res?.cached && res?.bundle) {
-      subBundle = res.bundle;
+    if (subBundle && subBundle.videoId === videoId && !subBundle.partial) {
       return subBundle;
     }
-    if (res?.job) {
-      subBundle = await waitForTranslateJob(res.job.id, videoId);
-      return subBundle;
+    if (translateInFlight && translateInFlight.videoId === videoId) {
+      return translateInFlight.promise;
     }
-    subBundle = res;
-    return subBundle;
+
+    const run = (async () => {
+      activeTranslatePct = 0;
+      activeTranslateStage = 'Starting translation...';
+      updateSubButtons();
+      try {
+        const res = await sendBg('TRANSLATE_VIDEO', {
+          payload: {
+            url: getCleanVideoUrl(videoId),
+            videoId,
+            title: getVideoTitle(),
+          },
+        });
+        if (getVideoId() !== videoId) return null;
+        if (res?.cached && res?.bundle) {
+          subBundle = res.bundle;
+          return subBundle;
+        }
+        if (res?.job) {
+          activeTranslatePct = res.job.progress || 5;
+          activeTranslateStage = res.job.stageText || 'Translating...';
+          updateSubButtons();
+          return await waitForTranslateJob(res.job.id, videoId);
+        }
+        subBundle = res;
+        return subBundle;
+      } finally {
+        if (translateInFlight?.videoId === videoId) {
+          translateInFlight = null;
+        }
+        if (getVideoId() === videoId) {
+          activeTranslatePct = null;
+          activeTranslateStage = '';
+          updateSubButtons();
+        }
+      }
+    })();
+
+    translateInFlight = { videoId, promise: run };
+    return run;
   }
 
   let subCycleStartMode = null;
@@ -1172,38 +1373,61 @@
   }
 
   async function onSubClick() {
+    const clickVideoId = getVideoId();
+    if (!clickVideoId) return;
+
     if (subMode === 'off') {
+      subCycleStartMode = subStyle.defaultMode || 'bilingual';
+      subMode = subCycleStartMode;
+      updateSubButtons();
+      if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       try {
         await ensureTranslatedBundle();
-        subCycleStartMode = subStyle.defaultMode || 'bilingual';
-        subMode = subCycleStartMode;
-        updateSubButtons();
-        if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
+        if (getVideoId() === clickVideoId && subMode !== 'off' && !syncRaf) {
+          syncRaf = requestAnimationFrame(tickSubtitles);
+        }
       } catch (err) {
-        subBtnEl.title = err.message;
-        subBtnEl.dataset.state = 'error';
-        const txtEl = subBtnEl.querySelector('.txt');
-        if (txtEl) txtEl.textContent = 'AI CC: Error';
+        if (getVideoId() === clickVideoId) {
+          subMode = 'off';
+          subCycleStartMode = null;
+          subBtnEl.title = err.message;
+          subBtnEl.dataset.state = 'error';
+          const txtEl = subBtnEl.querySelector('.txt');
+          if (txtEl) txtEl.textContent = 'AI CC: Error';
+        }
       }
       return;
     }
+
     if (subCycleStartMode && subMode === subCycleStartMode) {
       subMode = subCycleStartMode === 'bilingual' ? 'translated' : 'bilingual';
       syncSubModeToStorage(subMode);
       updateSubButtons();
+      if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
       return;
     }
+
     subMode = 'off';
     subCycleStartMode = null;
     const overlay = document.getElementById(SUB_OVERLAY_ID);
     if (overlay) overlay.innerHTML = '';
+    const signOverlay = document.getElementById(SIGN_OVERLAY_ID);
+    if (signOverlay) signOverlay.innerHTML = '';
+    lastRenderedSignKey = '';
     updateSubButtons();
   }
 
   async function onDubClick() {
     if (!dubEnabled) {
       try {
-        await ensureTranslatedBundle();
+        const curVid = getVideoId();
+        if (subBundle && subBundle.videoId === curVid && subBundle.cues?.length) {
+          if (subBundle.partial) {
+            ensureTranslatedBundle().catch(() => {});
+          }
+        } else {
+          await ensureTranslatedBundle();
+        }
         const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
         const wasPlaying = Boolean(video && !video.paused);
         const nowMs = (video?.currentTime || 0) * 1000;
@@ -1233,7 +1457,10 @@
           }
         }
         dubEnabled = true;
-        if (subMode === 'off') subMode = 'translated';
+        if (subMode === 'off') {
+          subCycleStartMode = subStyle.defaultMode || 'translated';
+          subMode = subCycleStartMode;
+        }
         lastSpokenCueIdx = -1;
         updateSubButtons();
         if (!syncRaf) syncRaf = requestAnimationFrame(tickSubtitles);
@@ -1323,6 +1550,10 @@
     removeSubOverlay();
     subBundle = null;
     subMode = 'off';
+    subCycleStartMode = null;
+    translateInFlight = null;
+    activeTranslatePct = null;
+    activeTranslateStage = '';
     dubEnabled = false;
     updateSubButtons();
     currentJob = null;
