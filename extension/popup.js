@@ -256,6 +256,8 @@ function renderDubEngine(eng, selectedVoice) {
       ? subStyle.dubMaleVoice
       : (mOpts.find((o) => o.value.includes('Hải Đăng'))?.value || mOpts[0]?.value || '');
   }
+
+  renderCastSection();
 }
 
 async function saveSubStyle() {
@@ -407,10 +409,41 @@ async function persistActiveCastUpdate(nextCast, nextOverrides) {
   }
 }
 
+function extractVideoIdFromUrl(urlStr) {
+  if (!urlStr) return '';
+  try {
+    const u = new URL(urlStr);
+    if (u.pathname.endsWith('/player.html')) {
+      return u.searchParams.get('videoId') || '';
+    }
+    if (u.hostname.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      const m = u.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return m[1];
+    }
+    if (u.hostname === 'youtu.be') {
+      return u.pathname.replace(/^\/+/, '').split('/')[0] || '';
+    }
+  } catch {
+    // Ignore invalid URL
+  }
+  return '';
+}
+
 async function loadActiveEpisodeCast() {
   try {
-    const active = await sendBg('GET_ACTIVE_VIDEO');
-    const vid = active?.videoId || '';
+    let vid = '';
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      vid = extractVideoIdFromUrl(tabs?.[0]?.url || '');
+    } catch {
+      // Fallback to stored activeVideo
+    }
+    if (!vid) {
+      const active = await sendBg('GET_ACTIVE_VIDEO');
+      vid = active?.videoId || '';
+    }
     if (!vid) return;
     if (vid !== activeEpisodeId || !activeEpisodeBundle) {
       activeEpisodeId = vid;

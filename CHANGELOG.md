@@ -2,6 +2,14 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.50] - 2026-11-29
+
+### Fixed
+- **Episode Cast Popup Detection**:
+  - Added `activeTab` permission (`manifest.json`) and `extractVideoIdFromUrl()` in `popup.js` so the popup directly detects the active YouTube / Shorts / Cloud Player video ID instead of relying solely on stored `SET_ACTIVE_VIDEO`.
+  - Ensured `renderSubStyle()` triggers `renderCastSection()` when toggling Auto Multi-Voice, switching TTS engines, or loading custom VieNeu voices.
+  - Added `visibilitychange` sync in `content.js` to keep `SET_ACTIVE_VIDEO` up to date when switching tabs.
+
 ## [1.2.49] - 2026-11-29
 
 ### Added

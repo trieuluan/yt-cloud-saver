@@ -1701,6 +1701,15 @@
     syncCurrentVideoJob();
   });
 
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const vid = getVideoId();
+      if (vid) {
+        sendBg('SET_ACTIVE_VIDEO', { videoId: vid, title: getVideoTitle() }).catch(() => {});
+      }
+    }
+  });
+
   ensureButton();
   syncCurrentVideoJob();
 })();
