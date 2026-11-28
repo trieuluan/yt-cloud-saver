@@ -101,40 +101,64 @@ pub fn char_similarity(a: &str, b: &str) -> f32 {
     (1.0 - (dist as f32 / max_len as f32)).clamp(0.0, 1.0)
 }
 
-/// Computes Mean Absolute Difference (`0.0..255.0`) across the middle 72% horizontal band of two RGB buffers.
-pub fn compute_center_mad_rgb(a: &[u8], b: &[u8], width: u32, height: u32) -> f32 {
+/// Computes `(rgb_max_channel_mad, center_spike_ratio)` across the middle 72% horizontal band.
+/// - `rgb_max_channel_mad` catches full-line changes and any font color (white, yellow, cyan, red...).
+/// - `center_spike_ratio` catches short 2-4 char lines appearing on a completely static background.
+pub fn compute_center_diff_metrics(a: &[u8], b: &[u8], width: u32, height: u32) -> (f32, f32) {
     if a.len() != b.len() || width < 8 || height < 4 {
-        return 255.0;
+        return (255.0, 1.0);
     }
-    let x_start = (width as usize) * 14 / 100;
-    let x_end = (width as usize) * 86 / 100;
-    let step_y = ((height as usize) / 24).max(1);
-    let step_x = ((x_end.saturating_sub(x_start)) / 64).max(1);
+    let w = width as usize;
+    let h = height as usize;
+    let x_start = w * 14 / 100;
+    let x_end = w * 86 / 100;
+    let cx_start = w * 30 / 100;
+    let cx_end = w * 70 / 100;
+    let cy_start = h * 18 / 100;
+    let cy_end = h * 82 / 100;
+    let step_y = (h / 28).max(1);
+    let step_x = ((x_end.saturating_sub(x_start)) / 72).max(1);
 
     let mut diff_sum = 0u64;
     let mut samples = 0u64;
+    let mut center_spikes = 0u64;
+    let mut center_samples = 0u64;
+
     let mut y = 0usize;
-    while y < height as usize {
+    while y < h {
+        let in_cy = y >= cy_start && y <= cy_end;
         let mut x = x_start;
         while x < x_end {
-            let idx = (y * (width as usize) + x) * 3;
+            let idx = (y * w + x) * 3;
             if idx + 2 < a.len() {
-                let la =
-                    (a[idx] as i32 * 77 + a[idx + 1] as i32 * 150 + a[idx + 2] as i32 * 29) >> 8;
-                let lb =
-                    (b[idx] as i32 * 77 + b[idx + 1] as i32 * 150 + b[idx + 2] as i32 * 29) >> 8;
-                diff_sum += (la - lb).unsigned_abs() as u64;
+                let dr = (a[idx] as i32 - b[idx] as i32).unsigned_abs();
+                let dg = (a[idx + 1] as i32 - b[idx + 1] as i32).unsigned_abs();
+                let db = (a[idx + 2] as i32 - b[idx + 2] as i32).unsigned_abs();
+                let max_ch = dr.max(dg).max(db) as u64;
+                diff_sum += max_ch;
                 samples += 1;
+                if in_cy && x >= cx_start && x <= cx_end {
+                    center_samples += 1;
+                    if max_ch >= 20 {
+                        center_spikes += 1;
+                    }
+                }
             }
             x += step_x;
         }
         y += step_y;
     }
-    if samples == 0 {
+    let mad = if samples == 0 {
         255.0
     } else {
         (diff_sum as f32) / (samples as f32)
-    }
+    };
+    let spike_ratio = if center_samples == 0 {
+        1.0
+    } else {
+        (center_spikes as f32) / (center_samples as f32)
+    };
+    (mad, spike_ratio)
 }
 
 /// Parses video `(duration_ms, width, height)` directly from `ffmpeg -hide_banner -i <video>` stderr
@@ -230,6 +254,32 @@ pub fn merge_roi_frames_into_cues(
         if valid.is_empty() {
             frame_lines.push((*ts_ms, String::new(), 0.0));
             continue;
+        }
+
+        // Prioritize the primary centered subtitle line so background paper/table text in ROI
+        // cannot crowd out the actual dialogue line.
+        if valid.len() > 2 {
+            let score_box = |b: &OcrTextBox| -> f32 {
+                let center_w = (1.0 - (b.center_x() - 0.5).abs() * 1.4).max(0.2);
+                let len_w = (b.text.chars().count().min(16) as f32).sqrt().max(1.0);
+                b.height * b.confidence * center_w * len_w
+            };
+            let primary = valid
+                .iter()
+                .copied()
+                .max_by(|a, b| {
+                    score_box(a)
+                        .partial_cmp(&score_box(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap();
+            let anchor_y = primary.center_y();
+            let anchor_h = primary.height.max(0.05);
+            valid.retain(|b| {
+                std::ptr::eq(*b, primary)
+                    || ((b.center_y() - anchor_y).abs() <= anchor_h * 2.0
+                        && b.height >= anchor_h * 0.55)
+            });
         }
 
         valid.sort_by(|a, b| {
@@ -800,7 +850,11 @@ pub async fn scan_video_ocr_segment(
                 let unchanged = prev_rgb
                     .as_ref()
                     .map(|(pw, ph, pr)| {
-                        *pw == w && *ph == h && compute_center_mad_rgb(pr, &raw, w, h) < 3.2
+                        if *pw != w || *ph != h {
+                            return false;
+                        }
+                        let (mad, spike) = compute_center_diff_metrics(pr, &raw, w, h);
+                        mad < 1.8 && spike < 0.008
                     })
                     .unwrap_or(false);
 
@@ -833,7 +887,11 @@ pub async fn scan_video_ocr_segment(
                     let unchanged = prev_sign_rgb
                         .as_ref()
                         .map(|(pw, ph, pr)| {
-                            *pw == w && *ph == h && compute_center_mad_rgb(pr, &raw, w, h) < 3.8
+                            if *pw != w || *ph != h {
+                                return false;
+                            }
+                            let (mad, spike) = compute_center_diff_metrics(pr, &raw, w, h);
+                            mad < 3.2 && spike < 0.015
                         })
                         .unwrap_or(false);
 
@@ -932,15 +990,68 @@ mod tests {
         let h = 16u32;
         let a = vec![20u8; (w * h * 3) as usize];
         let mut b = a.clone();
-        assert!(compute_center_mad_rgb(&a, &b, w, h) < 0.01);
-        for y in 4..12 {
-            for x in 16..48 {
+        let (mad0, spike0) = compute_center_diff_metrics(&a, &b, w, h);
+        assert!(mad0 < 0.01 && spike0 < 0.001);
+
+        // Simulate tiny 3-char colored/red subtitle in center (only ~3% of center pixels)
+        for y in 6..10 {
+            for x in 28..36 {
                 let idx = ((y * w + x) * 3) as usize;
-                b[idx] = 245;
-                b[idx + 1] = 245;
-                b[idx + 2] = 245;
+                b[idx] = 240; // Red channel spike even if luma is close
+                b[idx + 1] = 40;
+                b[idx + 2] = 40;
             }
         }
-        assert!(compute_center_mad_rgb(&a, &b, w, h) > 40.0);
+        let (_mad1, spike1) = compute_center_diff_metrics(&a, &b, w, h);
+        assert!(spike1 >= 0.008, "Expected center spike to catch short colored subtitle, got {spike1}");
+    }
+
+    #[test]
+    fn test_merge_roi_prioritizes_centered_subtitle_over_paper_clutter() {
+        let frames = vec![
+            (
+                0,
+                vec![
+                    OcrTextBox {
+                        text: "2332".to_string(),
+                        confidence: 0.90,
+                        x: 0.17,
+                        y: 0.12,
+                        width: 0.08,
+                        height: 0.10,
+                    },
+                    OcrTextBox {
+                        text: "2165".to_string(),
+                        confidence: 0.89,
+                        x: 0.17,
+                        y: 0.28,
+                        width: 0.08,
+                        height: 0.10,
+                    },
+                    OcrTextBox {
+                        text: "国外那边的正常业务照旧".to_string(),
+                        confidence: 0.95,
+                        x: 0.30,
+                        y: 0.52,
+                        width: 0.40,
+                        height: 0.28,
+                    },
+                ],
+            ),
+            (
+                250,
+                vec![OcrTextBox {
+                    text: "国外那边的正常业务照旧".to_string(),
+                    confidence: 0.96,
+                    x: 0.30,
+                    y: 0.52,
+                    width: 0.40,
+                    height: 0.28,
+                }],
+            ),
+        ];
+        let cues = merge_roi_frames_into_cues(&frames, 250);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].original, "国外那边的正常业务照旧");
     }
 }

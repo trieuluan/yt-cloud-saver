@@ -2,6 +2,12 @@
 
 All notable changes to **YT Cloud Saver** will be documented in this file.
 
+## [1.2.47] - 2026-11-28
+
+### Fixed & Improved
+- **OCR RGB Max-Channel & Center-Spike Pixel-Diff (`ocr/pipeline.rs`):** Replaced luma-averaged ROI diff with `max(|ΔR|, |ΔG|, |ΔB|)` + center-band spike ratio (`30%–70%` horizontal zone), preventing short 2–4 character lines (e.g. `想去哪`, `就在隔壁`) or colored/white text on bright backgrounds from being skipped on static shots.
+- **Primary Subtitle Baseline Priority (`ocr/pipeline.rs`):** Ranked ROI text boxes by subtitle likelihood (centeredness, height, confidence, character length) before capping to 2 lines, preventing background document/table text inside the ROI from crowding out the main dialogue subtitle.
+
 ## [1.2.46] - 2026-11-28
 
 ### Added & Improved
